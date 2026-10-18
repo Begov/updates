@@ -1727,34 +1727,11 @@ MOTION_GRAPHICS_FIX_ATTEMPTS = max(0, int(os.getenv('MOTION_GRAPHICS_FIX_ATTEMPT
 MOTION_GRAPHICS_RENDER_TIMEOUT = int(os.getenv('MOTION_GRAPHICS_RENDER_TIMEOUT', '600') or '600')
 
 # ============================================================================
-# CHAIN MODE (seamless video continuation)
+# Склейка: клипы-продолжения (соседние клипы с одним chain_id в плане)
 # ============================================================================
-# Story mode: off=independent clips, batch=morph between imggen pairs,
-#             morph=one big chain (all extends), chain=LLM-decided chains.
-# Сюжетный режим из программы убран: клипы всегда независимые, значение из .env
-# не учитывается.
-STORY_MODE = 'off'
-
-# Gen images only for chain heads (skip imggen for extends) — saves ~85% imggen
-CHAIN_IMGGEN_HEADS_ONLY = os.getenv('CHAIN_IMGGEN_HEADS_ONLY', '1').lower() in ('true', '1', 'yes')
-
-# Seconds from end to extract last frame (ffmpeg -sseof offset)
-VIDEO_EXTEND_FRAME_OFFSET = float(os.getenv('VIDEO_EXTEND_FRAME_OFFSET', '0.5'))
-
 # assemble.py: skip N first frames of extend clips (fps-independent via select filter)
 VIDEO_EXTEND_TRIM_FRAMES = int(os.getenv('VIDEO_EXTEND_TRIM_FRAMES', '1'))
 
-# Mute audio for extend clips (VEO sound artifacts on each extend start)
-VIDEO_EXTEND_MUTE_AUDIO = os.getenv('VIDEO_EXTEND_MUTE_AUDIO', '1').lower() in ('true', '1', 'yes')
-
-# Soft safety net: max clips in one chain before forced break (0=unlimited)
-VIDEO_EXTEND_MAX_CHAIN = int(os.getenv('VIDEO_EXTEND_MAX_CHAIN', '10'))
-
-# Cascade recovery: regen prev clip on fail instead of immediate force break
-CHAIN_CASCADE_RECOVERY = os.getenv('CHAIN_CASCADE_RECOVERY', '1').lower() in ('true', '1', 'yes')
-
-# Max fails of same clip before forced sub-chain head (prevents infinite loop)
-CHAIN_MAX_SAME_CLIP_FAILS = int(os.getenv('CHAIN_MAX_SAME_CLIP_FAILS', '3'))
 
 # ============================================================================
 # ПРОВЕРКА КЛЮЧЕЙ

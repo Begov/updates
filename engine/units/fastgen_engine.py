@@ -2429,35 +2429,6 @@ def generate_all_images(
         all_prompts = {k: v for k, v in all_prompts.items() if k in clip_ids}
         print(f"  Selected clips: {len(all_prompts)} ({', '.join(map(str, sorted(all_prompts.keys())))})")
 
-    # Chain heads only filter — генерим картинки только для head клипов цепочек.
-    # Extend клипы возьмут last_frame из mp4 предыдущего клипа цепочки.
-    # Экономит ~85% imggen в типичном chain mode проекте.
-    if (not include_infographics
-            and getattr(config, 'STORY_MODE', 'off') == 'chain'
-            and getattr(config, 'CHAIN_IMGGEN_HEADS_ONLY', True)):
-        _mp_path = project_path / 'montage_plan.json'
-        if _mp_path.exists():
-            try:
-                import json as _json
-                _mp = _json.loads(_mp_path.read_text(encoding='utf-8-sig'))
-                _mp_clips = _mp.get('clips', [])
-                if _mp_clips:
-                    from itertools import groupby as _groupby
-                    _head_ids = set()
-                    for _, _grp in _groupby(_mp_clips, key=lambda c: c.get('chain_id', c['id'])):
-                        _chain = list(_grp)
-                        if _chain:
-                            _head_ids.add(_chain[0]['id'])
-                    _before = len(all_prompts)
-                    _filtered = {k: v for k, v in all_prompts.items() if k in _head_ids}
-                    if _filtered:
-                        all_prompts = _filtered
-                        print(f"  [CHAIN HEADS ONLY] Filtered {_before} → {len(all_prompts)} clips (chain heads only)")
-                        logging.info(f"Chain heads filter: {_before} → {len(all_prompts)}")
-                    else:
-                        logging.warning("Chain heads filter would empty the prompt list — falling back to all clips")
-            except Exception as _e:
-                logging.warning(f"Could not apply chain heads filter: {_e} — generating all clips")
 
     # Real Photo skip filter — same logic as imggen.py / veo_video.py
     try:

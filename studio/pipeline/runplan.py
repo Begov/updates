@@ -270,7 +270,6 @@ def defaults_env(v: dict) -> dict:
         "CINAI_REMIX_ASPECT_RATIO": v["veo_ratio"],
         "CINAI_REMIX_QUALITY": v["cinai_remix_quality"],
         "CINAI_REMIX_MODEL": v["cinai_remix_model"],
-        "STORY_MODE": "off",                         # сюжетный режим убран
         "VEONONSTOP_IMAGE_UPSCALE": v["image_upscale"],
         "BEGO_IMGGEN_PARALLEL": str(v["veo_imggen_parallel"]),
         "VEONONSTOP_VIDEO_UPSCALE": _b(v["video_upscale"]),
@@ -460,7 +459,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         **varag_env(v),
         "BEGO_INFLIGHT_MODE": "1" if v["inflight_mode"] else "0",
         "BEGO_SKIP_PREFLIGHT": "1" if v["skip_preflight"] else "0",
-        "STORY_MODE": "off",                         # сюжетный режим убран: клипы независимые
         "PIPELINE_IMG_GEN": ig,
         # режим видео — из формы, а не из engine/.env: по нему движок решает, разрешена ли
         # нейрогенерация и нужна ли очередь видео (см. units/source_quota.py)

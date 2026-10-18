@@ -116,35 +116,6 @@ def _prepare_codex_env() -> tuple[dict, str, bool]:
     return codex_proxy.prepare()
 
 
-# ============================================================================
-# CHAIN MODE HELPERS
-# ============================================================================
-
-def _build_chain_meta(clips: list) -> dict:
-    """Вычисляет роль каждого клипа в цепочке.
-
-    Группирует по chain_id (или по c['id'] если chain_id отсутствует — одиночка).
-    Первый клип группы = HEAD, остальные = EXTEND с ссылкой на предыдущий клип.
-
-    Returns:
-        {clip_id: {'role': 'HEAD'|'EXTEND', 'chain_id': N,
-                   'prev_clip_id': M|None, 'is_single': bool}}
-    """
-    from itertools import groupby
-    meta = {}
-    for chain_key, grp in groupby(clips, key=lambda c: c.get('chain_id', c['id'])):
-        chain_clips = list(grp)
-        is_single = len(chain_clips) == 1
-        for pos, clip in enumerate(chain_clips):
-            meta[clip['id']] = {
-                'role': 'HEAD' if pos == 0 else 'EXTEND',
-                'chain_id': chain_key,
-                'prev_clip_id': chain_clips[pos - 1]['id'] if pos > 0 else None,
-                'is_single': is_single,
-            }
-    return meta
-
-
 def _publish_visual_intent(prompts_path: Path, id_pairs: list) -> int:
     """Положить замысел кадра из Pass 2 в montage_plan как `visual_intent`.
 
@@ -200,11 +171,8 @@ def _compact_intent(text: str, limit: int = 1200) -> str:
     return (cut[:stop + 1] if stop > limit // 2 else cut).strip()
 
 
-def _build_clip_card(clip: dict, fragments: list, chain_meta: dict) -> str:
-    """Собирает карточку клипа для GPT с chain-меткой.
-
-    Если chain_meta пуст или клипа в нём нет — карточка без метки (back-compat).
-    """
+def _build_clip_card(clip: dict, fragments: list) -> str:
+    """Собирает карточку клипа для GPT: голос за кадром и, для инфографики, указание источника."""
     cs = clip.get('startTime', 0)
     ce = clip.get('endTime', 0)
     texts = [f['text'] for f in fragments
@@ -212,113 +180,7 @@ def _build_clip_card(clip: dict, fragments: list, chain_meta: dict) -> str:
     voiceover = ' '.join(texts).strip() or '(pause)'
     source_line = '\nSOURCE: INFOGRAPHIC (make a static information graphic, not a cinematic scene)' \
         if clip.get('source') == 'infographic' else ''
-
-    meta = chain_meta.get(clip['id']) if chain_meta else None
-    if meta is None:
-        return f"[CLIP {clip['id']}]{source_line}\nVOICEOVER: {voiceover}"
-
-    if meta['role'] == 'HEAD' and meta['is_single']:
-        label = f"HEAD of chain {meta['chain_id']} (single clip)"
-    elif meta['role'] == 'HEAD':
-        label = f"HEAD of chain {meta['chain_id']}"
-    else:
-        label = f"EXTEND of chain {meta['chain_id']}, continues CLIP {meta['prev_clip_id']}"
-
-    return f"[CLIP {clip['id']}] {label}{source_line}\nVOICEOVER: {voiceover}"
-
-
-def _build_chain_chunks(clips: list, chunk_size: int) -> list:
-    """Жадно собирает чанки целыми цепочками до chunk_size.
-
-    Идёт по списку цепочек (после groupby по chain_id), складывает в текущий
-    чанк пока сумма клипов <= chunk_size. Если следующая цепочка не влезает —
-    закрывает текущий чанк, открывает новый.
-
-    Edge case: одна цепочка длиннее chunk_size — шлём её одной (не режем,
-    чтобы не терять continuity на стыке).
-
-    Returns: list of list of clips. Каждый внутренний list — это содержимое
-    одного chunk'а для одного exec вызова к GPT.
-    """
-    from itertools import groupby
-    chains = []
-    for _, grp in groupby(clips, key=lambda c: c.get('chain_id', c['id'])):
-        chains.append(list(grp))
-
-    chunks = []
-    current = []
-    for chain in chains:
-        if current and (len(current) + len(chain)) > chunk_size:
-            chunks.append(current)
-            current = []
-        current.extend(chain)
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def _build_chain_hint() -> str:
-    """Адаптивная инструкция для GPT Pass 2 в зависимости от STORY_MODE и PIPELINE_IMG_GEN.
-
-    Returns:
-        - "" если не chain mode
-        - i2v версия (action-centric для HEAD и EXTEND) если imggen активен
-        - t2v версия (scene-centric для HEAD, action-centric для EXTEND) если imggen=skip
-    """
-    if getattr(config, 'STORY_MODE', 'off') != 'chain':
-        return ""
-
-    imggen_active = (getattr(config, 'PIPELINE_IMG_GEN', '') != 'skip')
-
-    if imggen_active:
-        return """
-
-⚠️ CHAIN STORY MODE — i2v with imggen heads
-Each clip is marked HEAD or EXTEND in its card. Chains are independent.
-
-HEAD clips: VEO will animate from a generated still image (clip starts
-from a static frame). Write an ACTION-CENTRIC prompt:
-- Describe what the character STARTS to do from the initial pose.
-- Do NOT re-describe the location, lighting, character appearance —
-  they are already on the image. Re-describing them creates conflict
-  and visual drift.
-- Focus on action, motion, what changes in 8 seconds.
-
-EXTEND clips: VEO animates from the last_frame of the previous clip
-in the same chain (continues CLIP X). Write an ACTION-CENTRIC prompt:
-- Start with: "Continuing the action from previous shot, [Subject]
-  [next action from voiceover]. No cut, smooth flow."
-- Do NOT describe lighting/palette/character — VEO uses the last_frame.
-- Focus only on what HAPPENS in this clip.
-
-Single-clip chains: just a HEAD with no EXTEND — write a normal HEAD
-prompt (action-centric, no continuation needed).
-
-Chains are independent: EXTEND of chain 2 does NOT relate to chain 1.
-"""
-    else:
-        return """
-
-⚠️ CHAIN STORY MODE — t2v (no imggen)
-Each clip is marked HEAD or EXTEND in its card. Chains are independent.
-
-HEAD clips: VEO has NO starting image (text-to-video). Write a
-SCENE-CENTRIC prompt:
-- Full description: location, lighting, color palette, character
-  appearance, action, camera, lens, mood.
-- Standard VEO prompt as if writing a fresh scene.
-
-EXTEND clips: VEO animates from the last_frame of the previous clip
-in the same chain (continues CLIP X). Write an ACTION-CENTRIC prompt:
-- Start with: "Continuing the action from previous shot, [Subject]
-  [next action from voiceover]. No cut, smooth flow."
-- Do NOT describe lighting/palette/character — VEO uses the last_frame.
-
-Single-clip chains: just a HEAD with no EXTEND — write a normal scene
-prompt (no continuation needed).
-
-Chains are independent: EXTEND of chain 2 does NOT relate to chain 1.
-"""
+    return f"[CLIP {clip['id']}]{source_line}\nVOICEOVER: {voiceover}"
 
 
 # ============================================================================
@@ -1722,38 +1584,6 @@ class GptDirector:
         except Exception as _ce:                            # noqa: BLE001
             logging.debug('cover_hook: указание не собрано (%s)', _ce)
 
-        # Chain story mode directive (only if STORY_MODE=chain)
-        chain_suffix = ""
-        if config.STORY_MODE == 'chain':
-            chain_suffix = """
-
----
-
-## CHAIN STORY MODE
-
-Split clips into "chains". A chain = continuous visual/narrative flow:
-same location, same camera POV, continuous action, same main character.
-
-Add "chain_id" to each clip:
-- Clips in same chain → same chain_id (consecutive by id)
-- Chain break → new chain_id (+1). Break criteria:
-  * Location change (street → apartment)
-  * Major camera angle shift (close-up → wide, low → high)
-  * POV change (character A eyes → character B eyes, third person → first person)
-  * Sharp editorial transition (fade, time skip)
-
-Numbering: chain_id = 1, 2, 3, ... (no gaps).
-First clip always chain_id=1.
-Clips within a chain are consecutive by id (no breaks).
-
-Single-clip chain → unique chain_id (chain of 1 clip).
-
-Example:
-{{"id": 1, "file": "1.mp4", "startTime": 0.0, "endTime": 7.8, "chain_id": 1}},
-{{"id": 2, "file": "2.mp4", "startTime": 7.8, "endTime": 14.2, "chain_id": 1}},
-{{"id": 3, "file": "3.mp4", "startTime": 14.2, "endTime": 20.0, "chain_id": 2}},
-"""
-
         # Real Photo markup directive (only if REAL_PHOTO_ENABLED=1).
         # Текст — из units/archive_tags.py: одна точка правды на оба директора
         # (chat_director зовёт её же). Режиссёр только ПОМЕЧАЕТ; запросы пишет стадия.
@@ -1828,7 +1658,7 @@ Rules:
 - Last clip endTime must equal audioDuration ({audio_duration:.2f})
 - IDs sequential: 1, 2, 3, ...
 - File format: "{{id}}.mp4"
-{theme_rule}{chain_suffix}{real_photo_suffix}{stock_suffix}{youtube_suffix}{infographic_suffix}{mograph_suffix}
+{theme_rule}{real_photo_suffix}{stock_suffix}{youtube_suffix}{infographic_suffix}{mograph_suffix}
 Write the JSON file and then report your status in your final response."""
 
     # =========================================================================
@@ -1911,10 +1741,6 @@ Write the JSON file and then report your status in your final response."""
         transcription = json.loads(transcription_path.read_text(encoding='utf-8-sig'))
         fragments = transcription.get('transcription', [])
 
-        # Chain meta: HEAD/EXTEND роль каждого клипа в цепочке.
-        # Если STORY_MODE != chain — meta пустой, карточки рисуются без меток.
-        chain_meta = _build_chain_meta(clips) if getattr(config, 'STORY_MODE', 'off') == 'chain' else {}
-
         # Resume: подсчитать существующие промпты
         if resume_path:
             rp = Path(resume_path)
@@ -1937,17 +1763,13 @@ Write the JSON file and then report your status in your final response."""
                 _ex = prompts_path.read_text(encoding='utf-8').strip().split('\n\n')
                 _initial_prev_sample = '\n\n'.join([p for p in _ex if p.strip()][-5:])
 
-            # Chain mode: жадная сборка чанков целыми цепочками (не режем chain'ы).
-            # Не-chain mode: старая логика — фиксированные пачки по chunk_size.
-            if chain_meta:
-                _chunks_lists = _build_chain_chunks(clips[cursor:], chunk_size)
-            else:
-                _chunks_lists = []
-                _cur_pos = cursor
-                while _cur_pos < total_clips:
-                    _end_pos = min(_cur_pos + chunk_size, total_clips)
-                    _chunks_lists.append(clips[_cur_pos:_end_pos])
-                    _cur_pos = _end_pos
+            # Фиксированные пачки по chunk_size
+            _chunks_lists = []
+            _cur_pos = cursor
+            while _cur_pos < total_clips:
+                _end_pos = min(_cur_pos + chunk_size, total_clips)
+                _chunks_lists.append(clips[_cur_pos:_end_pos])
+                _cur_pos = _end_pos
 
             _chunks_to_run = []
             for _cclips in _chunks_lists:
@@ -1956,7 +1778,7 @@ Write the JSON file and then report your status in your final response."""
                 _nc = len(_cclips)
                 # Глобальный индекс начала этого чанка в clips (для prev plot context)
                 _clip_start = clips.index(_cclips[0])
-                _cards = [_build_clip_card(_c, fragments, chain_meta) for _c in _cclips]
+                _cards = [_build_clip_card(_c, fragments) for _c in _cclips]
                 _pp = ""
                 if _clip_start > 0:
                     _pp_lines = []
@@ -2081,7 +1903,7 @@ Write the JSON file and then report your status in your final response."""
                         _rem_start = cd['clip_start'] + len(_found_ids)
                         print(f"   🔄 Чанк {_i+1}: {len(_found_ids)}/{cd['n_clips']} — досылаем {_missing} клипов (IDs: {sorted(_missing_ids)[:5]}{'...' if _missing > 5 else ''}) ретрай {_retries}/{_MAX_PAR_RETRIES} (cooldown {_cooldown}s)...")
                         time.sleep(_cooldown)
-                        _cards = [_build_clip_card(_c, fragments, chain_meta) for _c in _rem_clips]
+                        _cards = [_build_clip_card(_c, fragments) for _c in _rem_clips]
                         _pp_lines = []
                         for _pc in clips[max(0, _rem_start - 5):_rem_start]:
                             _cs2, _cend2 = _pc.get('startTime', 0), _pc.get('endTime', 0)
@@ -2435,12 +2257,7 @@ Write the JSON file and then report your status in your final response."""
         prev_plot: str,
         append_mode: bool,
     ) -> str:
-        """Сборка промпта для Pass 2 с clip cards.
-
-        Chain mode: clip_block уже содержит метки HEAD/EXTEND в карточках клипов
-        (через _build_clip_card). chain_hint собирается адаптивно через
-        _build_chain_hint() в зависимости от STORY_MODE и PIPELINE_IMG_GEN.
-        """
+        """Сборка промпта для Pass 2 с clip cards."""
         # Read style guide inline — avoids Codex file read tool calls
         try:
             _sg_text = read_user_text(style_guide_path)
@@ -2469,10 +2286,6 @@ Write the JSON file and then report your status in your final response."""
 {prev_plot}
 """
 
-        # Chain hint — адаптивный текст про HEAD/EXTEND в зависимости от
-        # STORY_MODE и PIPELINE_IMG_GEN. Возвращает "" если не chain mode.
-        chain_hint = _build_chain_hint()
-
         # Load template from external file (editable via GUI Prompts tab)
         _tpl_path = self.prompts_dir / 'gpt_director_pass2.txt'
         try:
@@ -2492,7 +2305,9 @@ Write the JSON file and then report your status in your final response."""
         result = result.replace('{to_id}', str(to_id))
         result = result.replace('{total_clips}', str(total_clips))
         result = result.replace('{clip_block}', clip_block)
-        result = result.replace('{chain_hint}', chain_hint)
+        # {chain_hint} — место подсказки режима цепочки (его в программе нет): пустая строка,
+        # чтобы метка не попала в промпт из изменённых пользователем шаблонов
+        result = result.replace('{chain_hint}', '')
         from units.motion_prompts import pass2_video_directive
         result += pass2_video_directive()
         from units.infographic_tags import (
