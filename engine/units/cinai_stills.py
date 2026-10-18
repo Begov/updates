@@ -28,7 +28,6 @@ except ImportError:                                               # pragma: no c
 
 import params as config
 from prompt_extract import extract_all_prompts, find_prompts_file
-from units.still_claims import acquire_image_claim
 
 
 CINAI_STUDIO_URL = "https://cinai.tv/StudioChat?tab=image"
@@ -800,8 +799,6 @@ def generate_all_images(
     quality: Optional[str] = None,
     silent: bool = False,
     include_infographics: bool = False,
-    use_claims: bool = False,
-    claim_owner: str = "cinai",
     **_: Any,
 ) -> Dict[str, Any]:
     project_path = Path(project_dir)
@@ -914,31 +911,15 @@ def generate_all_images(
                     break
             raise CinAIError(f"clip #{clip_id} failed: {_clean_error(str(last_error))}")
 
-    claimed_elsewhere: List[int] = []
-
-    def generate_one_claimed(clip_id: int, prompt: str) -> Dict[str, Any]:
-        if not use_claims:
-            return generate_one(clip_id, prompt)
-        claim = acquire_image_claim(output_dir, clip_id, owner=claim_owner)
-        if claim is None:
-            return {"id": clip_id, "status": "claimed_elsewhere"}
-        try:
-            return generate_one(clip_id, prompt)
-        finally:
-            claim.release()
-
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="cinai") as executor:
         futures = {
-            executor.submit(generate_one_claimed, cid, prompt): cid
+            executor.submit(generate_one, cid, prompt): cid
             for cid, prompt in pending.items()
         }
         for future in as_completed(futures):
             clip_id = futures[future]
             try:
                 result = future.result()
-                if result.get("status") == "claimed_elsewhere":
-                    claimed_elsewhere.append(clip_id)
-                    continue
                 results.append(result)
                 print(f"  [CinAI] #{clip_id}: OK", flush=True)
             except Exception as exc:
@@ -952,5 +933,4 @@ def generate_all_images(
         "skipped": len(skipped),
         "results": sorted(results, key=lambda item: item["id"]),
         "failed_ids": sorted(failed),
-        "claimed_elsewhere_ids": sorted(claimed_elsewhere),
     }

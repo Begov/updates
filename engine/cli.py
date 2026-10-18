@@ -1128,12 +1128,7 @@ def _run_post_pipeline_silent(
             prompts_file_path=prompts_file_path,
         )
 
-    def _call_image_provider(
-        provider: str,
-        *,
-        use_claims: bool = False,
-        clip_ids=None,
-    ):
+    def _call_image_provider(provider: str, *, clip_ids=None):
         """Run one image provider with the current pipeline settings."""
         provider = str(provider or '').strip().lower()
         if provider == 'fastgen':
@@ -1148,9 +1143,6 @@ def _run_post_pipeline_silent(
                 dual_key=_img_dual,
                 preflight=not _skip_pf,
                 silent=True,
-                use_claims=use_claims,
-                claim_owner='fastgen',
-                allow_veo_fallback=not use_claims,
             )
         if provider == 'veononstop':
             if not _has_any_veo_key():
@@ -1165,12 +1157,6 @@ def _run_post_pipeline_silent(
                 upscale_resolution=imggen_upscale,
                 preflight=not _skip_pf,
                 silent=True,
-                max_cycles=(
-                    getattr(config, 'VEONONSTOP_MAX_SILENT_CYCLES', 3)
-                    if use_claims else None
-                ),
-                use_claims=use_claims,
-                claim_owner='veononstop',
             )
         if provider == 'cinai':
             if not getattr(config, 'CINAI_ACCESS_TOKEN', ''):
@@ -1185,15 +1171,13 @@ def _run_post_pipeline_silent(
                 ),
                 quality=getattr(config, 'CINAI_QUALITY', '1K'),
                 silent=True,
-                use_claims=use_claims,
-                claim_owner='cinai',
             )
         if provider == 'skip':
             return {'generated': _count_generated_images(), 'failed': 0}
         raise RuntimeError(f'Unknown ImageGen provider: {provider!r}')
 
     def _run_image_generation(provider: str, *, clip_ids=None):
-        """Run the selected ImageGen, optionally sharing the pool with CinAI."""
+        """Run the selected ImageGen."""
         # Обложка кладётся в generated/ ДО генерации: её клип помечен как
         # готовый, генератор такой пропустит — рисовать нечего, картинка
         # пришла файлом от пользователя.
@@ -1204,147 +1188,7 @@ def _run_post_pipeline_silent(
         except Exception as _cover_exc:                     # noqa: BLE001
             print(f"  [Обложка] не подложена: {_cover_exc}")
 
-        provider = str(provider or '').strip().lower()
-        pool_enabled = (
-            str(os.environ.get(
-                'CINAI_IMAGE_POOL_ENABLED',
-                '1' if getattr(config, 'CINAI_IMAGE_POOL_ENABLED', False) else '0',
-            )).strip().lower() in ('1', 'true', 'yes', 'on')
-            and provider in ('fastgen', 'veononstop')
-        )
-        if not pool_enabled:
-            return _call_image_provider(provider, clip_ids=clip_ids)
-        if not getattr(config, 'CINAI_ACCESS_TOKEN', ''):
-            print("  [+CinAI] CINAI_ACCESS_TOKEN is empty; using only the primary ImageGen")
-            return _call_image_provider(provider, clip_ids=clip_ids)
-
-        from concurrent.futures import ThreadPoolExecutor
-
-        print(
-            f"  [+CinAI] Shared image pool: {provider} + CinAI "
-            f"({config.CINAI_MODEL}, "
-            f"x{getattr(config, 'CINAI_MAX_PARALLEL', 6)})"
-        )
-        provider_results = {}
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix='image-pool') as pool:
-            futures = {
-                pool.submit(
-                    _call_image_provider, provider, use_claims=True,
-                    clip_ids=clip_ids,
-                ): provider,
-                pool.submit(
-                    _call_image_provider, 'cinai', use_claims=True,
-                    clip_ids=clip_ids,
-                ): 'cinai',
-            }
-            for future, label in futures.items():
-                try:
-                    provider_results[label] = future.result()
-                except Exception as exc:
-                    provider_results[label] = {
-                        'generated': 0,
-                        'failed': 0,
-                        'failed_ids': [],
-                        'error': str(exc),
-                    }
-                    print(f"  [+CinAI] {label} failed: {exc}")
-                    logging.exception("Image pool provider %s failed", label)
-
-        primary_failed_ids = [
-            int(cid)
-            for cid in provider_results.get(provider, {}).get('failed_ids', [])
-            if not _image_exists(int(cid))
-        ]
-        if primary_failed_ids:
-            print(
-                f"  [+CinAI] {provider} failed {len(primary_failed_ids)} clip(s); "
-                "returning them to CinAI once"
-            )
-            try:
-                provider_results['cinai_retry'] = _call_image_provider(
-                    'cinai',
-                    clip_ids=primary_failed_ids,
-                )
-            except Exception as exc:
-                provider_results['cinai_retry'] = {
-                    'generated': 0,
-                    'failed': len(primary_failed_ids),
-                    'failed_ids': primary_failed_ids,
-                    'error': str(exc),
-                }
-                print(f"  [+CinAI] CinAI retry failed to start: {exc}")
-
-        cinai_result = provider_results.get('cinai', {})
-        cinai_failed_ids = [
-            int(cid) for cid in cinai_result.get('failed_ids', [])
-            if not _image_exists(int(cid))
-        ]
-        cinai_failed_ids.extend(
-            int(cid)
-            for cid in provider_results.get('cinai_retry', {}).get(
-                'failed_ids', [])
-            if not _image_exists(int(cid))
-        )
-        cinai_failed_ids = sorted(set(cinai_failed_ids))
-        fallback_result = {}
-        if cinai_failed_ids:
-            if _has_any_veo_key():
-                print(
-                    f"  [+CinAI] CinAI failed {len(cinai_failed_ids)} clip(s); "
-                    "sending them directly to VeoNonStop"
-                )
-                fallback_result = veo_generate_all_images(
-                    project_dir=p_dir,
-                    mode=config.VEONONSTOP_IMGGEN_MODE,
-                    max_parallel=imggen_parallel,
-                    clip_ids=cinai_failed_ids,
-                    aspect_ratio=ar,
-                    active_keys=_resolve_veo_key(imggen_key_slot),
-                    upscale_resolution=imggen_upscale,
-                    preflight=not _skip_pf,
-                    silent=True,
-                    max_cycles=getattr(
-                        config, 'VEONONSTOP_MAX_SILENT_CYCLES', 3),
-                    use_claims=False,
-                )
-            else:
-                print(
-                    f"  [+CinAI] VeoNonStop fallback unavailable for "
-                    f"{len(cinai_failed_ids)} CinAI failure(s): no API key"
-                )
-
-        failed_candidates = set()
-        for item in provider_results.values():
-            failed_candidates.update(
-                int(cid) for cid in item.get('failed_ids', []))
-        failed_candidates.update(
-            int(cid) for cid in fallback_result.get('failed_ids', []))
-        unresolved = sorted(
-            cid for cid in failed_candidates if not _image_exists(cid))
-        result = {
-            'generated': _count_generated_images(),
-            'failed': len(unresolved),
-            'failed_ids': unresolved,
-            'results': provider_results,
-            'cinai_fallback': fallback_result,
-            't2v_fallback_required': any(
-                item.get('t2v_fallback_required')
-                for item in list(provider_results.values()) + [fallback_result]
-            ),
-            't2v_fallback_reason': next(
-                (
-                    item.get('t2v_fallback_reason')
-                    for item in list(provider_results.values()) + [fallback_result]
-                    if item.get('t2v_fallback_required')
-                ),
-                '',
-            ),
-        }
-        print(
-            f"  [+CinAI] Pool complete: images={result['generated']}, "
-            f"failed={result['failed']}"
-        )
-        return result
+        return _call_image_provider(str(provider or '').strip().lower(), clip_ids=clip_ids)
 
     def _video_single_prompt() -> Optional[str]:
         if prompt_mode != 'single':
@@ -1487,15 +1331,6 @@ def _run_post_pipeline_silent(
             return f"ImageGen: CinAI (workers {max(1, min(int(_iw), 6))})"
         _label = 'FastGen' if provider == 'fastgen' else 'VeoNonStop'
         summary = f"ImageGen: {_label} (key {imggen_key_slot}, workers {imggen_parallel})"
-        pool_enabled = str(os.environ.get(
-            'CINAI_IMAGE_POOL_ENABLED',
-            '1' if getattr(config, 'CINAI_IMAGE_POOL_ENABLED', False) else '0',
-        )).strip().lower() in ('1', 'true', 'yes', 'on')
-        if pool_enabled:
-            summary += (
-                f" + CinAI ({config.CINAI_MODEL}, "
-                f"workers {getattr(config, 'CINAI_MAX_PARALLEL', 6)})"
-            )
         return summary
 
     def _videogen_summary() -> Optional[str]:

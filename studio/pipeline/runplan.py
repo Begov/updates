@@ -120,9 +120,6 @@ def stage_env(v: dict) -> dict:
     m["MOTION_GRAPHICS_START_SEC"] = str(max(0, int(v.get("motion_gate_sec", 0))))
     m["MOTION_GRAPHICS_MODEL"] = str(v.get("motion_model") or "")
     m["MOTION_GRAPHICS_PARALLEL"] = str(_clamp(v.get("motion_parallel", 2), 1, 8))
-    # «+ потоки CinAI» к другому провайдеру убраны: пул выключен явно, чтобы старое
-    # значение из engine/.env не включило его без ведома пользователя
-    m["CINAI_IMAGE_POOL_ENABLED"] = "false"
     # функции, которых нет в BegoFrame, явно выключены
     # Референсов нет: движок не копирует их в проект (даже из inbox/ref/) и не берёт из ref/ проекта
     m["BEGO_REFS_DISABLED"] = "1"

@@ -58,7 +58,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
-from units.still_claims import acquire_image_claim
 
 colorama.init(autoreset=True)
 
@@ -2345,8 +2344,6 @@ def generate_all_images(
     silent: bool = False,
     include_infographics: bool = False,
     allow_veo_fallback: bool = True,
-    use_claims: bool = False,
-    claim_owner: str = "fastgen",
 ) -> Dict[str, Any]:
     """
     Основная функция этапа 3: генерация изображений для всех клипов.
@@ -2585,24 +2582,6 @@ def generate_all_images(
     # ------------------------------------------------------------------
     output_dir = project_path / 'generated'
     output_dir.mkdir(exist_ok=True)
-
-    def _generate_claimed(**kwargs):
-        clip_id = int(kwargs['clip_id'])
-        if not use_claims:
-            return generate_single_clip(**kwargs)
-        claim = acquire_image_claim(output_dir, clip_id, owner=claim_owner)
-        if claim is None:
-            return {
-                'id': clip_id,
-                'status': 'claimed_elsewhere',
-                'file': None,
-                'operation_id': None,
-                'duration_sec': 0,
-            }
-        try:
-            return generate_single_clip(**kwargs)
-        finally:
-            claim.release()
 
     skipped = []
     for cid in list(all_prompts.keys()):
@@ -3322,7 +3301,7 @@ def generate_all_images(
                     if len(clients_cfg) > 1:
                         # Dual-key: worker-assignment внутри generate_single_clip
                         future = executor.submit(
-                            _generate_claimed,
+                            generate_single_clip,
                             client=None,
                             clip_id=cid,
                             prompt=pending_prompts[cid],
@@ -3340,7 +3319,7 @@ def generate_all_images(
                     else:
                         # Single-key: классический режим
                         future = executor.submit(
-                            _generate_claimed,
+                            generate_single_clip,
                             client=client,
                             clip_id=cid,
                             prompt=pending_prompts[cid],
@@ -3371,7 +3350,6 @@ def generate_all_images(
                         cycle_results.append(clip_result)
                         status_icon = {
                             'ok': '+',
-                            'claimed_elsewhere': '=',
                             'censored': 'C',
                             'error': 'X',
                         }.get(
@@ -3466,7 +3444,7 @@ def generate_all_images(
 
         # Разбираем результаты цикла: перемещаем OK в накопитель
         for r in cycle_results:
-            if r['status'] in ('ok', 'claimed_elsewhere'):
+            if r['status'] == 'ok':
                 if r['status'] == 'ok':
                     accumulated_ok[r['id']] = r
                 pending_prompts.pop(r['id'], None)

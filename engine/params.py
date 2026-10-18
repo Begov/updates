@@ -862,10 +862,6 @@ def _cinai_free(value: str, allowed: tuple) -> str:
 
 CINAI_MODEL = _cinai_free(os.getenv('CINAI_MODEL', ''), CINAI_FREE_IMAGE_MODELS)
 CINAI_REMIX_MODEL = _cinai_free(os.getenv('CINAI_REMIX_MODEL', ''), CINAI_FREE_REMIX_MODELS)
-CINAI_IMAGE_POOL_ENABLED = (
-    os.getenv('CINAI_IMAGE_POOL_ENABLED', 'false').strip().lower()
-    in ('true', '1', 'yes', 'on')
-)
 CINAI_ASPECT_RATIO = (os.getenv('CINAI_ASPECT_RATIO', '16:9') or '16:9').strip()
 if CINAI_ASPECT_RATIO not in ('16:9', '9:16'):          # формат 1:1 из программы убран
     CINAI_ASPECT_RATIO = '16:9'

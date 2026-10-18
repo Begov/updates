@@ -56,7 +56,6 @@ if _modules_dir not in sys.path:
 from tqdm import tqdm
 import colorama
 from colorama import Fore, Style
-from units.still_claims import acquire_image_claim
 
 colorama.init(autoreset=True)
 
@@ -941,8 +940,6 @@ def generate_all_images(
     upscale_resolution: Optional[str] = None,
     include_infographics: bool = False,
     banana_model_key: Optional[str] = None,
-    use_claims: bool = False,
-    claim_owner: str = "veononstop",
     client_provider: Optional[str] = None,
     client_options: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -1075,24 +1072,6 @@ def generate_all_images(
     # ------------------------------------------------------------------
     output_dir = project_path / 'generated'
     output_dir.mkdir(exist_ok=True)
-
-    def _generate_claimed(**kwargs):
-        clip_id = int(kwargs['clip_id'])
-        if not use_claims:
-            return _generate_single_image(**kwargs)
-        claim = acquire_image_claim(output_dir, clip_id, owner=claim_owner)
-        if claim is None:
-            return {
-                'id': clip_id,
-                'status': 'claimed_elsewhere',
-                'file': None,
-                'task_id': None,
-                'duration_sec': 0,
-            }
-        try:
-            return _generate_single_image(**kwargs)
-        finally:
-            claim.release()
 
     # Чей клиент: явный провайдер вызова или провайдер основных картинок из окружения
     _provider = (client_provider or os.environ.get('BEGO_IMAGE_PROVIDER', '') or 'veononstop').strip().lower()
@@ -1606,7 +1585,7 @@ def generate_all_images(
                 _clip_prompt = pending_prompts[cid]
                 _clip_refs = _filter_refs_by_prompt_tokens(_clip_prompt, ref_images)
                 future = executor.submit(
-                    _generate_claimed,
+                    _generate_single_image,
                     client=clients_cfg[0]['client'],
                     clip_id=cid,
                     prompt=_clip_prompt,
@@ -1664,7 +1643,6 @@ def generate_all_images(
                             cycle_results.append(clip_result)
                             icon = {
                                 'ok': '+',
-                                'claimed_elsewhere': '=',
                             }.get(clip_result['status'], 'X')
                             dur = clip_result.get('duration_sec', 0)
                             if clip_result['status'] == 'ok' and dur > 0:
@@ -1708,7 +1686,7 @@ def generate_all_images(
 
         # Разбор результатов
         for r in cycle_results:
-            if r['status'] in ('ok', 'claimed_elsewhere'):
+            if r['status'] == 'ok':
                 if r['status'] == 'ok':
                     accumulated_ok[r['id']] = r
                 pending_prompts.pop(r['id'], None)
