@@ -189,8 +189,6 @@ def defaults_env(v: dict) -> dict:
         "PIPELINE_START_POINT": v["start_point"],
         "ASSEMBLYAI_LANGUAGE_CODE": v["language"],
         "DIRECTOR_TWO_PASS": _b(v["direction_mode"] == "2-pass"),
-        "DIRECTOR_BACKEND": "gpt",
-        "GPT_PROVIDER": "openai",
         "GPT_MODEL": v["gpt_model"],
         "GPT_PASS2_CHUNK_SIZE": str(v["gpt_chunk_size"] if v.get("pass2_chunk_enabled") else 0),
         "GPT_PASS2_PARALLEL": str(v["gpt_parallel"]),
@@ -477,8 +475,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         "ASSEMBLYAI_LANGUAGE_CODE": v["language"],
         "SUBTITLE_PHRASE_UNIT": v["subtitle_phrase_unit"],
         "SUBTITLE_PHRASE_LEN": str(v["subtitle_phrase_len"]),
-        "DIRECTOR_BACKEND": "gpt",
-        "GPT_PROVIDER": "openai",
         "GPT_MODEL": v["gpt_model"],
         "GPT_PASS2_CHUNK_SIZE": str(v["gpt_chunk_size"] if v.get("pass2_chunk_enabled") else 0),
         "GPT_PASS2_PARALLEL": str(v["gpt_parallel"]),
@@ -529,7 +525,7 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
 # ---------------------------------------------- изменение настроек во время прогона
 # Переменные, которые читает только режиссура: после готового плана их смена на файл не влияет
 DIRECTION_ONLY_ENV = frozenset({
-    "GPT_MODEL", "GPT_PROVIDER", "GPT_PASS2_CHUNK_SIZE", "GPT_PASS2_PARALLEL", "DIRECTOR_BACKEND",
+    "GPT_MODEL", "GPT_PASS2_CHUNK_SIZE", "GPT_PASS2_PARALLEL",
     "ASSEMBLYAI_LANGUAGE_CODE", "INTRO_BLOCK_DURATION", "INTRO_CLIP_MIN_DURATION",
     "INTRO_CLIP_MAX_DURATION", "VIDEO_CLIP_MIN_DURATION", "VIDEO_CLIP_MAX_DURATION",
 })

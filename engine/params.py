@@ -4,7 +4,7 @@
 import os
 import sys
 from pathlib import Path
-from dotenv import dotenv_values, load_dotenv
+from dotenv import load_dotenv
 
 # Загрузка переменных окружения из .env
 _ENV_PATH = Path(__file__).parent / '.env'
@@ -27,29 +27,6 @@ if not _ENV_PATH.exists():
     except OSError:
         pass                      # только чтение — работаем на умолчаниях
 load_dotenv(_ENV_PATH)
-
-
-def _shared_env_value(key: str, default: str = '') -> str:
-    """Read shared reseller credentials without importing unrelated app settings."""
-    value = str(os.getenv(key, '') or '').strip()
-    if value:
-        return value
-    app_dir = Path(__file__).resolve().parent.parent
-    workspace_dir = app_dir.parent
-    for env_path in (
-        app_dir / '.env',
-        workspace_dir / '.env',
-        workspace_dir / 'STORY_REWRITER' / '.env',
-    ):
-        if not env_path.is_file():
-            continue
-        try:
-            value = str(dotenv_values(env_path).get(key) or '').strip()
-        except Exception:
-            value = ''
-        if value:
-            return value
-    return default
 
 
 def _model(key: str, default: str = '') -> str:
@@ -175,8 +152,6 @@ PASS1_PARALLEL = int(_p1par_raw) if _p1par_raw.isdigit() and int(_p1par_raw) > 0
 # GPT / CODEX DIRECTOR
 # ============================================================================
 
-# Backend режиссуры: 'gpt' (Codex CLI, по умолчанию), 'claude_code' или 'claude_api'
-DIRECTOR_BACKEND = (os.getenv('DIRECTOR_BACKEND', '') or 'gpt').strip().lower()
 
 # must_have ЗАМОРОЖЕН (решение 25.08): выкл. → модель его не сочиняет (токены),
 # ютуб-вижн его не получает (жёсткий список может отбраковать всех кандидатов).
@@ -209,106 +184,6 @@ GPT_DIRECTOR_TIMEOUT = int(os.getenv('GPT_DIRECTOR_TIMEOUT', '1200'))
 # Отдельный короткий таймаут для одного вызова Codex в rewrite-цепочке цензуры.
 # Не должен зависать на 20 мин из-за одного клипа — rewrite быстрый по природе.
 GPT_REWRITE_TIMEOUT = int(os.getenv('GPT_REWRITE_TIMEOUT', '90'))
-
-# ============================================================================
-# CLAUDE DIRECTOR (alternative backend: Claude Code CLI + Claude Nexus)
-# ============================================================================
-_claude_env = os.getenv('CLAUDE_CODE_EXE_PATH', '').strip()
-if _claude_env:
-    CLAUDE_CODE_EXE_PATH = _claude_env
-else:
-    CLAUDE_CODE_EXE_PATH = _shutil.which('claude') or _shutil.which('claude.cmd') or ''
-
-# Claude Code accepts aliases like "sonnet" / "opus" and full model names.
-CLAUDE_MODEL = _model('CLAUDE_MODEL', 'sonnet')
-CLAUDE_DIRECTOR_TIMEOUT = int(os.getenv('CLAUDE_DIRECTOR_TIMEOUT', str(GPT_DIRECTOR_TIMEOUT)))
-CLAUDE_CODE_MAX_TURNS = int(os.getenv('CLAUDE_CODE_MAX_TURNS', '20'))
-CLAUDE_CODE_PERMISSION_MODE = os.getenv('CLAUDE_CODE_PERMISSION_MODE', 'bypassPermissions').strip()
-
-# true = prefer logged-in Claude Pro/Max subscription. We remove ANTHROPIC_API_KEY
-# from the child process so Claude Code does not silently switch to API billing.
-CLAUDE_CODE_USE_SUBSCRIPTION = os.getenv(
-    'CLAUDE_CODE_USE_SUBSCRIPTION', 'true'
-).lower() in ('true', '1', 'yes')
-
-# CLAUDE API means the Nexus Claude reseller everywhere in BegoFrame.
-# Credentials remain shared with STORY_REWRITER/root .env; they are not copied
-# into the portable distribution.
-CLAUDE_RESELLER_ANTHROPIC_URL = _shared_env_value(
-    'CLAUDE_RESELLER_ANTHROPIC_URL',
-    'https://ccmaxshop.de5.net/v1/messages',
-)
-CLAUDE_RESELLER_ANTHROPIC_API_KEY = _shared_env_value(
-    'CLAUDE_RESELLER_ANTHROPIC_API_KEY',
-)
-CLAUDE_RESELLER_ANTHROPIC_EXTRA_API_KEYS = _shared_env_value(
-    'CLAUDE_RESELLER_ANTHROPIC_EXTRA_API_KEYS',
-)
-CLAUDE_RESELLER_ANTHROPIC_MODEL = _shared_env_value(
-    'CLAUDE_RESELLER_ANTHROPIC_MODEL',
-    'claude-sonnet-4-6',
-)
-
-# Backward-compatible aliases used by the existing claude_api backend.
-CLAUDE_API_KEY = (
-    CLAUDE_RESELLER_ANTHROPIC_API_KEY
-    or os.getenv('CLAUDE_API_KEY', '').strip()
-)
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY', '').strip()
-CLAUDE_API_BASE = CLAUDE_RESELLER_ANTHROPIC_URL
-CLAUDE_API_FORMAT = 'anthropic'
-_claude_api_model_raw = (
-    _model('CLAUDE_API_MODEL', '')
-    or CLAUDE_RESELLER_ANTHROPIC_MODEL
-)
-_CLAUDE_NEXUS_MODEL_ALIASES = {
-    'claude-sonnet-4.8': 'claude-sonnet-4-8',
-    'claude-sonnet-4.6': 'claude-sonnet-4-6',
-    'claude-sonnet-4.5': 'claude-sonnet-4-5-20250929',
-    'claude-opus-4.8': 'claude-opus-4-8',
-    'claude-opus-4.7': 'claude-opus-4-7',
-    'claude-opus-4.6': 'claude-opus-4-6',
-    'claude-haiku-4.5': 'claude-haiku-4-5',
-}
-
-
-def _normalize_claude_nexus_model(model: str) -> str:
-    model = str(model or '').strip()
-    if model.startswith('kr/'):
-        model = model[3:]
-    return _CLAUDE_NEXUS_MODEL_ALIASES.get(model, model)
-
-
-CLAUDE_API_MODEL = _normalize_claude_nexus_model(
-    _claude_api_model_raw)
-CLAUDE_API_VERSION = os.getenv('CLAUDE_API_VERSION', '2023-06-01').strip()
-CLAUDE_API_BETA = os.getenv('CLAUDE_API_BETA', '').strip()
-CLAUDE_API_MAX_TOKENS = int(os.getenv('CLAUDE_API_MAX_TOKENS', '16000'))
-CLAUDE_API_TEMPERATURE = float(os.getenv('CLAUDE_API_TEMPERATURE', '0.4'))
-CLAUDE_API_RESPONSE_FORMAT = os.getenv('CLAUDE_API_RESPONSE_FORMAT', 'json_object').strip()
-_claude_api_debug_dir = os.getenv('CLAUDE_API_DEBUG_DIR', str(LOGS_DIR)).strip()
-CLAUDE_API_DEBUG_DIR = str(
-    (BASE_DIR / _claude_api_debug_dir) if _claude_api_debug_dir and not Path(_claude_api_debug_dir).is_absolute()
-    else Path(_claude_api_debug_dir or LOGS_DIR)
-)
-_claude_api_pass2_chunk_raw = os.getenv('CLAUDE_API_PASS2_CHUNK_SIZE', '20')
-CLAUDE_API_PASS2_CHUNK_SIZE = (
-    int(_claude_api_pass2_chunk_raw) if _claude_api_pass2_chunk_raw.isdigit() else 20
-)
-# Claude Code (CLI) pass2 chunk — отдельный от api; по умолчанию как api (20)
-_claude_code_pass2_chunk_raw = os.getenv('CLAUDE_CODE_PASS2_CHUNK_SIZE', '20')
-CLAUDE_CODE_PASS2_CHUNK_SIZE = (
-    int(_claude_code_pass2_chunk_raw) if _claude_code_pass2_chunk_raw.isdigit() else 20
-)
-CLAUDE_API_USER_AGENT = os.getenv(
-    'CLAUDE_API_USER_AGENT',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BegoFrame/1.0'
-).strip()
-CLAUDE_API_REFERER = os.getenv(
-    'CLAUDE_API_REFERER',
-    'https://ccmaxshop.de5.net/',
-).strip()
-
 
 # ============================================================================
 # STOCK (Pexels / Pixabay / Local Stock Library) — сток-футаж и фото
@@ -361,12 +236,9 @@ STOCK_PROMPT_FALLBACK = os.getenv('STOCK_PROMPT_FALLBACK', 'true').lower() in ('
 # Своя настройка (не общая с real_photo): видео качается дольше архивных фото.
 STOCK_WAIT_TIMEOUT = int(os.getenv('STOCK_WAIT_TIMEOUT', '1800'))
 # Оператор промптажа стока (запросы + сопоставление своей библиотеки).
-# Пусто/auto = тот же, кем размечает режиссёр.
+# Пусто/auto = модель режиссёра; транспорт всегда Codex.
 STOCK_PROMPT_PROVIDER = os.getenv('STOCK_PROMPT_PROVIDER', '').strip().lower()
 STOCK_PROMPT_MODEL = _model('STOCK_PROMPT_MODEL', '')
-if STOCK_PROMPT_PROVIDER == 'claude_api':
-    STOCK_PROMPT_MODEL = _normalize_claude_nexus_model(
-        STOCK_PROMPT_MODEL)
 # Отсекать ИИ-сгенерированный сток (умеет только Pixabay: isAiGenerated)
 STOCK_EXCLUDE_AI = os.getenv('STOCK_EXCLUDE_AI', 'true').lower() in ('true', '1', 'yes', 'on')
 # Своя папка с футажами (Local Stock Library). Пусто = источник выключен
@@ -406,9 +278,6 @@ STOCK_MIN_PART_SEC = max(0.5, float(os.getenv('STOCK_MIN_PART_SEC', '1.5') or 1.
 # Пробрасывается в env запускаемого codex.exe (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY) и в usage-запрос.
 CODEX_PROXY = os.getenv('CODEX_PROXY', '').strip()
 
-# Прокси для Claude (подписка Pro/Max, claude.ai блокит РФ). Пусто = напрямую.
-# Юзер задаёт в GUI (формат host:port:user:pass — нормализуется в URL). НЕ тянем из config.yaml втихую.
-CLAUDE_PROXY = os.getenv('CLAUDE_PROXY', '').strip()
 # Ключи (бесплатные). Пул: _2.._8 для ротации
 PEXELS_API_KEY = os.getenv('PEXELS_API_KEY', '').strip()
 PEXELS_API_KEY_2 = os.getenv('PEXELS_API_KEY_2', '').strip()
@@ -446,13 +315,6 @@ CODEX_MAX_PARALLEL = max(1, min(16, int(os.getenv('CODEX_MAX_PARALLEL', '4') or 
 CODEX_RETRIES = max(1, min(5, int(os.getenv('CODEX_RETRIES', '2') or 2)))
 
 
-# Codex "high demand" cooldown (s) — пауза перед retry когда OpenAI возвращает
-# "We're currently experiencing high demand". Retry сразу = опять та же стена.
-GPT_HIGH_DEMAND_COOLDOWN = int(os.getenv('GPT_HIGH_DEMAND_COOLDOWN', '90'))
-
-# Sandbox mode: 'danger-full-access' или 'workspace-write'
-GPT_SANDBOX_MODE = os.getenv('GPT_SANDBOX_MODE', 'danger-full-access')
-
 # Количество клипов на один exec вызов pass 2 (0 = все за раз).
 # Default 80 — для chain mode жадная сборка чанков по цепочкам (см. _run_pass2).
 _gpt_chunk_raw = os.getenv('GPT_PASS2_CHUNK_SIZE', '') or '80'
@@ -464,74 +326,6 @@ GPT_PASS2_CHUNK_SIZE = int(_gpt_chunk_raw) if _gpt_chunk_raw.isdigit() else 80
 _gpt_parallel_raw = os.getenv('GPT_PASS2_PARALLEL', '') or '6'
 GPT_PASS2_PARALLEL = int(_gpt_parallel_raw) if _gpt_parallel_raw.isdigit() else 6
 
-# ============================================================================
-# GPT PROVIDER: 'openai' | direct chat providers. Only DeepSeek/OpenRouter use Moon Bridge.
-# ============================================================================
-# Codex общается с моделью через OpenAI Responses API. DeepSeek и OpenRouter его не поддерживают,
-# поэтому используется локальный прокси Moon Bridge (транслирует Responses → chat/completions).
-# OpenRouter = унифицированный прокси ко всем моделям (Qwen, Claude и др.) через OpenAI-формат.
-# См. https://github.com/deepseek-ai/awesome-deepseek-agent (DeepSeek), https://openrouter.ai/docs (OpenRouter)
-GPT_PROVIDER = (os.getenv('GPT_PROVIDER', '') or 'openai').strip().lower()
-
-# DeepSeek API ключ (используется Moon Bridge'ом, прокидывается в его config.yml)
-DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', '').strip()
-# Модель DeepSeek для режиссуры
-DEEPSEEK_MODEL = _model('DEEPSEEK_MODEL', 'deepseek-v4-flash')
-
-# OpenRouter API ключ (https://openrouter.ai/settings/keys)
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '').strip()
-# Модель OpenRouter: 'openrouter/free' (auto router), 'qwen/qwen3-coder:free', etc
-OPENROUTER_MODEL = _model('OPENROUTER_MODEL', 'openrouter/free')
-# Web Search для OpenRouter (прямой chat_director): 'enabled' → к модели добавляется
-# суффикс ':online', 'disabled' → чистый slug (без интернета). GUI: web_on/web_off.
-OPENROUTER_WEB_SEARCH = (os.getenv('OPENROUTER_WEB_SEARCH', '') or 'disabled').strip().lower()
-
-# Codex/GPT через OpenAI-совместимый Ailink reseller-шлюз.
-CODEX_RESELLER_URL = (
-    os.getenv('CODEX_RESELLER_URL', '')
-    or 'https://ai.ailink1.com/v1/chat/completions'
-).strip()
-CODEX_RESELLER_API_KEY = os.getenv('CODEX_RESELLER_API_KEY', '').strip()
-CODEX_RESELLER_MODEL = _model('CODEX_RESELLER_MODEL', 'gpt-5.6-terra')
-
-# GPT через Nexus reseller. Это отдельный OpenAI-compatible маршрут, не
-# Claude Nexus /v1/messages и не Ailink CODEX_RESELLER_*.
-GPT_NEXUS_URL = _shared_env_value(
-    'GPT_NEXUS_URL',
-    'https://ccmaxshop.de5.net/v1/chat/completions',
-).strip()
-GPT_NEXUS_API_KEY = _shared_env_value('GPT_NEXUS_API_KEY').strip()
-GPT_NEXUS_EXTRA_API_KEYS = _shared_env_value('GPT_NEXUS_EXTRA_API_KEYS').strip()
-GPT_NEXUS_MODEL = _shared_env_value('GPT_NEXUS_MODEL', 'gpt-5.5').strip()
-GPT_NEXUS_USER_AGENT = _shared_env_value(
-    'GPT_NEXUS_USER_AGENT', 'codex_cli_rs/latest').strip()
-
-# Meta Muse Spark is a text-only OpenAI-compatible chat provider.
-# The Contributor model is the only currently approved model in this app.
-META_MUSE_URL = (
-    os.getenv('META_MUSE_URL', '')
-    or 'https://api.meta.ai/v1/chat/completions'
-).strip()
-META_MUSE_API_KEY = os.getenv('META_MUSE_API_KEY', '').strip()
-META_MUSE_MODEL = _model('META_MUSE_MODEL', 'muse-spark-1.2-contributor')
-try:
-    META_MUSE_MAX_TOKENS = max(
-        1, int(os.getenv('META_MUSE_MAX_TOKENS', '') or 96000))
-except ValueError:
-    META_MUSE_MAX_TOKENS = 96000
-
-# ============================================================================
-# CHAT DIRECTOR (прямой HTTP для text providers, без Codex/Moon Bridge)
-# ============================================================================
-# Уровень reasoning/thinking режиссёра: off | low | medium | high | max.
-# Маппится в нативные параметры провайдера (см. reasoning_params_for_provider).
-CHAT_REASONING_LEVEL = (os.getenv('CHAT_REASONING_LEVEL', '') or 'medium').strip().lower()
-# Максимум output-токенов на один chat-запрос (Pass2-чанк). Reasoning-модели жгут
-# токены на размышления — нужен запас. Один общий лимит на каждый чанк.
-try:
-    CHAT_MAX_TOKENS = int(os.getenv('CHAT_MAX_TOKENS', '') or 64000)
-except ValueError:
-    CHAT_MAX_TOKENS = 64000
 
 # Pass 2 оптимизация: выносить NEGATIVE-блок из вывода модели (дописывать скриптом).
 # Стайлгайд должен иметь секцию "## NEGATIVE PROMPT — APPEND ... VERBATIM" с code-блоком.
@@ -547,123 +341,17 @@ PASS2_EXTERNALIZE_REFMATCH = (os.getenv('PASS2_EXTERNALIZE_REFMATCH', '') or '1'
 PASS2_EXTERNALIZE_STYLE = (os.getenv('PASS2_EXTERNALIZE_STYLE', '') or '1').strip() not in ('0', 'false', 'no', '')
 
 
-def reasoning_params_for_provider(provider: str, level: str = None) -> dict:
-    """Маппит GUI-уровень reasoning (off/low/medium/high/max) в нативные параметры
-    провайдера для тела chat/completions запроса.
-
-    DeepSeek: thinking {enabled|disabled} + reasoning_effort (только high|max).
-    OpenRouter: reasoning {effort: none|low|medium|high|xhigh, exclude: true}.
-    Возвращает dict, который мёрджится в request body (пустой при неизвестном провайдере).
-    """
-    level = (level or CHAT_REASONING_LEVEL or 'medium').strip().lower()
-    provider = (provider or '').strip().lower()
-
-    if provider == 'deepseek':
-        if level == 'off':
-            return {'thinking': {'type': 'disabled'}}
-        # DeepSeek знает только high|max (low/medium → high по их же compat-слою)
-        effort = 'max' if level == 'max' else 'high'
-        return {'thinking': {'type': 'enabled'}, 'reasoning_effort': effort}
-
-    if provider == 'openrouter':
-        # off: НЕ шлём effort:none — на reasoning-обязательных моделях free-роутера это
-        # даёт HTTP 400 ("Reasoning is mandatory..."). Вместо этого exclude:true —
-        # модель думает минимально, но COT не возвращает. Совместимо со всеми моделями.
-        if level == 'off':
-            return {'reasoning': {'exclude': True}}
-        _map = {'low': 'low', 'medium': 'medium', 'high': 'high', 'max': 'xhigh'}
-        effort = _map.get(level, 'medium')
-        # exclude=true: модель думает, но COT не возвращает (нам нужен только финальный JSON)
-        return {'reasoning': {'effort': effort, 'exclude': True}}
-
-    if provider == 'meta_muse':
-        # Meta accepts one top-level depth field. Keep the GUI vocabulary aligned
-        # with the API vocabulary while making "off" the smallest safe depth.
-        effort = {
-            'off': 'minimal',
-            'low': 'low',
-            'medium': 'medium',
-            'high': 'high',
-            'max': 'xhigh',
-        }.get(level, 'medium')
-        return {'reasoning_effort': effort}
-
-    return {}
-
-# Moon Bridge: бинарь (собранный go build) + config.yml + изолированный CODEX_HOME
-MOONBRIDGE_DIR = BASE_DIR.parent / 'moonbridge'
-_mb_exe_env = os.getenv('MOONBRIDGE_EXE_PATH', '')
-if _mb_exe_env and os.path.exists(_mb_exe_env):
-    MOONBRIDGE_EXE_PATH = _mb_exe_env
-elif sys.platform == 'win32':
-    MOONBRIDGE_EXE_PATH = str(MOONBRIDGE_DIR / 'moonbridge.exe')
-else:
-    MOONBRIDGE_EXE_PATH = str(MOONBRIDGE_DIR / 'moonbridge')
-# Адрес прокси (host:port). Codex ходит на http://<addr>/v1
-MOONBRIDGE_ADDR = os.getenv('MOONBRIDGE_ADDR', '127.0.0.1:38440').strip()
-# Изолированный CODEX_HOME для DeepSeek-режима (чтобы не трогать пользовательский ~/.codex с OpenAI-авторизацией)
-DEEPSEEK_CODEX_HOME = str(MOONBRIDGE_DIR / '_codex_home')
+def codex_cli_args_for_provider() -> list:
+    """Аргументы Codex CLI: маршрут подписки OpenAI, пользовательский config.toml не читается."""
+    return ['--ignore-user-config', '-c', 'model_provider="openai"']
 
 
-def gpt_provider_is_deepseek() -> bool:
-    """True если активен DeepSeek-провайдер (и есть ключ)."""
-    return GPT_PROVIDER == 'deepseek' and bool(DEEPSEEK_API_KEY)
-
-
-def gpt_provider_is_openrouter() -> bool:
-    """True если активен OpenRouter-провайдер (и есть ключ)."""
-    return GPT_PROVIDER == 'openrouter' and bool(OPENROUTER_API_KEY)
-
-
-def gpt_provider_is_codex_reseller() -> bool:
-    """True если активен Codex/GPT reseller и задан его API-ключ."""
-    return GPT_PROVIDER == 'codex_reseller' and bool(CODEX_RESELLER_API_KEY)
-
-
-def gpt_provider_is_gpt_nexus() -> bool:
-    """True если активен GPT Nexus OpenAI-compatible reseller."""
-    return GPT_PROVIDER == 'gpt_nexus' and bool(GPT_NEXUS_API_KEY)
-
-
-def gpt_provider_is_meta_muse() -> bool:
-    """True если активен текстовый Meta Muse API."""
-    return GPT_PROVIDER == 'meta_muse' and bool(META_MUSE_API_KEY)
-
-
-def gpt_provider_uses_moonbridge() -> bool:
-    """True если текущий провайдер требует Moon Bridge (DeepSeek или OpenRouter)."""
-    return gpt_provider_is_deepseek() or gpt_provider_is_openrouter()
-
-
-def codex_model_for_provider(default_model: str = None) -> str:
-    """Имя модели для передачи в codex -m. При DeepSeek/OpenRouter всегда 'moonbridge' (route)."""
-    if gpt_provider_uses_moonbridge():
-        return 'moonbridge'
-    return default_model or GPT_MODEL
-
-
-def codex_cli_args_for_provider(provider: str = None) -> list:
-    """Codex CLI args that keep the OpenAI subscription route isolated from custom providers."""
-    active_provider = (provider or GPT_PROVIDER or 'openai').strip().lower()
-    if active_provider == 'openai':
-        return ['--ignore-user-config', '-c', 'model_provider="openai"']
-    return []
-
-
-def codex_env_for_provider(base_env: dict = None, provider: str = None) -> dict:
-    """Окружение для subprocess codex. При DeepSeek/OpenRouter подменяет CODEX_HOME на
-    изолированный (с config.toml, указывающим на Moon Bridge).
+def codex_env_for_provider(base_env: dict = None) -> dict:
+    """Окружение для subprocess codex.
     Если задан CODEX_PROXY — весь трафик codex.exe (Node) идёт через него (обход гео-блока
     ChatGPT без Proxifier). Ставим и UPPER, и lower варианты — Node/разные либы читают по-разному."""
     from units.codex_credentials import codex_env
     env = codex_env(base_env)
-    active_provider = (provider or GPT_PROVIDER or 'openai').strip().lower()
-    uses_moonbridge = (
-        (active_provider == 'deepseek' and bool(DEEPSEEK_API_KEY))
-        or (active_provider == 'openrouter' and bool(OPENROUTER_API_KEY))
-    )
-    if uses_moonbridge:
-        env['CODEX_HOME'] = DEEPSEEK_CODEX_HOME
     _px = CODEX_PROXY
     if _px:
         for _k in ('HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy'):
@@ -677,38 +365,6 @@ def codex_env_for_provider(base_env: dict = None, provider: str = None) -> dict:
 # VEO style guide для Codex adapt (дефолт = универсальный, можно заменить в GUI)
 VEO_ADAPT_STYLE_GUIDE = os.getenv('VEO_ADAPT_STYLE_GUIDE',
     str(BASE_DIR / 'instructions' / 'veo_i2v_universal_style.md'))
-
-# Claude web chat (unofficial claude-api package).
-# Prefer CLAUDE_COOKIE_JSON with a browser-exported JSON file. CLAUDE_COOKIE can
-# hold a raw "name=value; name2=value2" Cookie header as a fallback.
-CLAUDE_COOKIE_JSON = os.getenv('CLAUDE_COOKIE_JSON', '')
-CLAUDE_COOKIE = os.getenv('CLAUDE_COOKIE', '')
-CLAUDE_WORK_DIR = os.getenv('CLAUDE_WORK_DIR', '')
-
-# ============================================================================
-# НАСТРОЙКИ YT PACKER (YouTube-упаковщик)
-# ============================================================================
-
-# Языки (через запятую). Первый = исходный язык транскрипции
-_yt_langs_raw = os.getenv('YT_PACK_LANGUAGES', 'ru,en')
-YT_PACK_LANGUAGES = [lang.strip() for lang in _yt_langs_raw.split(',') if lang.strip()]
-
-# Оператор YT Packer (заголовки/описание/теги/перевод). Явный выбор:
-#   codex | deepseek | openrouter | meta_muse | claude_api
-YT_PACK_BACKEND = (os.getenv('YT_PACK_BACKEND', '') or '').strip().lower()
-# Модель по умолчанию (используется как fallback для перевода и контента)
-YT_PACK_MODEL = _model('YT_PACK_MODEL', 'gpt-5.4-mini')
-# Модель для перевода субтитров (можно дешевле — flash/flash-lite)
-YT_PACK_TRANSLATE_MODEL = _model('YT_PACK_TRANSLATE_MODEL') or YT_PACK_MODEL
-# Модель для контента: заголовки, описание, теги, промпты обложек (можно мощнее — pro)
-YT_PACK_CONTENT_MODEL = _model('YT_PACK_CONTENT_MODEL') or YT_PACK_MODEL
-if YT_PACK_BACKEND == 'claude_api':
-    YT_PACK_MODEL = _normalize_claude_nexus_model(YT_PACK_MODEL)
-    YT_PACK_TRANSLATE_MODEL = _normalize_claude_nexus_model(
-        YT_PACK_TRANSLATE_MODEL)
-    YT_PACK_CONTENT_MODEL = _normalize_claude_nexus_model(
-        YT_PACK_CONTENT_MODEL)
-
 
 # Длина фразы субтитров (для subtitles.srt, выжигаемых конкатом).
 # UNIT=chars → по символам (дефолт 50). UNIT=words → по СЛОВАМ (1 = каждое слово отдельным

@@ -16,7 +16,6 @@ import os
 import subprocess
 import shutil
 import re
-import base64
 import json
 import logging
 from dataclasses import dataclass, field
@@ -241,15 +240,6 @@ def build_contact_sheet(candidates: list[Candidate], output_path: Path) -> Optio
     return output_path
 
 
-# Chat-провайдеры, принимающие картинку в сообщении. CLI-агенты (codex,
-# claude_code) сюда не входят: они смотрят лист файлом, а не через chat API, —
-# см. `vision_capable`.
-VISION_CHAT_PROVIDERS = frozenset({
-    "deepseek", "openrouter",
-    "meta_muse", "claude_api", "codex_reseller", "gpt_nexus",
-})
-
-
 # Кадр мельче этого по длинной стороне на 1080p — каша: Ken Burns растянет
 # его на весь экран. Порог тот же, что у Wikimedia (`_COMMONS_MIN_WIDTH`), но
 # теперь по ФАКТУ скачанного файла, а не по метаданным источника.
@@ -296,138 +286,40 @@ def normalize_reasons(value) -> dict[str, str]:
     return {}
 
 
-def vision_capable(provider: str) -> bool:
-    """Умеет ли этот оператор СМОТРЕТЬ картинки — единственный источник правды.
-
-    Своих списков стадии больше не держат: у ютуба был свой `CHAT_PROVIDERS`,
-    и после того как вижн научился ходить CLI-агентом, стадия продолжала
-    считать codex «не умеющим смотреть» и молча выключала проверку кадров
-    (улов прогона 25.08)."""
-    from units.operator_hub import CLI_AGENTS
-
-    provider = (provider or "").strip().lower()
-    return provider in VISION_CHAT_PROVIDERS or provider in CLI_AGENTS
-
-
 def resolve_vision_provider(stage: str) -> tuple[str, str]:
-    """(провайдер, модель) вижна для стадии — СВОЯ настройка, потом общий фолбэк.
+    """(провайдер, модель) вижна стоковой стадии: Codex с STOCK_VISION_MODEL или моделью режиссёра.
 
-      • stock → STOCK_VISION_PROVIDER + STOCK_VISION_MODEL
-    Всё это выбирается в GUI, руками в .env лезть не нужно.
+    Провайдер задаётся в GUI (STOCK_VISION_PROVIDER); пусто/«auto» — вижн выключен.
     """
     import params as config
-    from units.operator_hub import CLI_AGENTS, _model_for
-
-    def _pair(provider_key: str, model_key: str) -> tuple[str, str]:
-        provider = str(getattr(config, provider_key, "") or "").strip().lower()
-        model = str(getattr(config, model_key, "") or "").strip()
-        # Провайдер, которого больше нет (например, из старого .env), — как «не задан».
-        if provider in ("", "auto") or (provider not in CLI_AGENTS
-                                        and provider not in VISION_CHAT_PROVIDERS):
-            return "", ""
-        # CLI-агенту (Codex на GPT-подписке, Claude Code) модель можно не
-        # задавать — он возьмёт свою из настроек режиссёра.
-        if not model and provider not in CLI_AGENTS:
-            return "", ""
-        return provider, model or _model_for(provider)
+    from units.operator_hub import _model_for
 
     stage = (stage or "").split("/")[0].strip().lower()
-    chain = [("STOCK_VISION_PROVIDER", "STOCK_VISION_MODEL")] if stage == "stock" else []
-    for provider_key, model_key in chain:
-        provider, model = _pair(provider_key, model_key)
-        if provider:
-            return provider, model
-    return "", ""
+    provider = str(getattr(config, "STOCK_VISION_PROVIDER", "") or "").strip().lower()
+    if stage != "stock" or provider in ("", "auto"):
+        return "", ""
+    model = str(getattr(config, "STOCK_VISION_MODEL", "") or "").strip()
+    return "codex", model or _model_for()
 
 
 def _ask_vision(provider: str, model: str, task: str, sheet: Path,
                 work_dir: Optional[Path] = None,
                 schema_file: str = "vision_pick.json") -> str:
-    """Один вопрос с картинкой.
+    """Один вопрос с картинкой: контактный лист уходит в `codex exec -i`, ответ пишется файлом по схеме."""
+    from units.codex_runner import CodexRunner
 
-    Транспорта два: CLI-агент (Codex — GPT-подписка, Claude Code) и общий
-    chat_completion для chat-провайдеров. CLI-ветка появилась 25.08 по требованию пользователя —
-    контактный лист уходит в `codex exec -i`, ответ пишется файлом по схеме.
-    """
-    from units.operator_hub import CLI_AGENTS
-
-    if provider in CLI_AGENTS:
-        work = Path(work_dir or Path(sheet).parent)
-        work.mkdir(parents=True, exist_ok=True)
-        result_file = work / "vision_cli_result.json"
-        result_file.unlink(missing_ok=True)
-        if provider in ("claude_code", "claude"):
-            # Claude Code читает картинку сам — путь к листу идёт текстом.
-            from units.claudecli_runner import ClaudeCodeRunner
-
-            task_file = work / "_vision_task.md"
-            task_file.write_text(
-                task
-                + "\n\nThe contact sheet is this image file — open and look at it:\n"
-                + Path(sheet).resolve().as_posix()
-                + "\n\nWrite the JSON answer to this exact path and print nothing:\n"
-                + result_file.resolve().as_posix(),
-                encoding="utf-8")
-            code, out, err, _ = ClaudeCodeRunner(model_name=model or None, timeout=300).run_task_file(
-                task_file, work, label="vision")
-            if code != 0:
-                raise RuntimeError(f"claude_code vision failed ({code}): {(err or out)[-300:]}")
-            if not result_file.exists():
-                raise RuntimeError("claude_code vision: result file was not created")
-            return result_file.read_text(encoding="utf-8-sig", errors="replace")
-
-        from units.codex_runner import CodexRunner
-
-        runner = CodexRunner(model_name=model or None, timeout=300)
-        # Схема отдаёт reasons списком пар: у structured output нет произвольных
-        # ключей объекта, а вердикт нужен по КАЖДОМУ кандидату. Схема зависит от
-        # задачи: выбрать один кадр (vision_pick) или отранжировать все
-        # (vision_rank у ютуба).
-        runner.run(task, schema_file, result_file, work, images=[Path(sheet)])
-        return result_file.read_text(encoding="utf-8-sig", errors="replace")
-
-    from units.llm_gateway import chat_completion
-
-    return chat_completion(
-        provider, model,
-        [{"role": "user", "content": [
-            {"type": "text", "text": task},
-            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,"
-                + base64.b64encode(Path(sheet).read_bytes()).decode("ascii")}},
-        ]}],
-        max_tokens=600, json_mode=True, timeout=240,
-    )
+    work = Path(work_dir or Path(sheet).parent)
+    work.mkdir(parents=True, exist_ok=True)
+    result_file = work / "vision_cli_result.json"
+    result_file.unlink(missing_ok=True)
+    runner = CodexRunner(model_name=model or None, timeout=300)
+    # Схема отдаёт reasons списком пар: у structured output нет произвольных
+    # ключей объекта, а вердикт нужен по КАЖДОМУ кандидату. Схема зависит от
+    # задачи: выбрать один кадр (vision_pick) или отранжировать все (vision_rank).
+    runner.run(task, schema_file, result_file, work, images=[Path(sheet)])
+    return result_file.read_text(encoding="utf-8-sig", errors="replace")
 
 
-# ДИСКВАЛИФИКАТОР ИДЁТ ПЕРВЫМ. Раньше правило про водяные знаки стояло в конце
-# длинного блока о снисходительности («не бракуй за мелочи», «отказ стоит целого
-# нового поиска») и вдобавок соседствовало с разрешением на credit line по краю.
-# Вижн честно взвешивал «сцена подходит идеально» против «какие-то знаки» и
-# выбирал соответствие: прогон 26.08, клип 6 — кадр гримёрной, залитый логотипами
-# Vecteezy по всей площади, выбран со словами «fits the dressing-room routine
-# best», про знаки НЕ сказано ни слова. Знаки на панели были прекрасно видны —
-# дело не в разрешении, а в том, что правило было слабее правила о
-# снисходительности.
-#
-# Правило нужно ТОЛЬКО архивной ветке: помеченный мусор приходит из EPF и Serper
-# (веб-выдача). В стоковый лист ему попасть неоткуда — там лишь `local`,
-# `pexels` и `pixabay`, см. `stock_lookup.SEARCH_FUNCS`.
-_WATERMARK_RULE = (
-    "DISQUALIFIER, check it FIRST and independently of how well the frame "
-    "fits: a candidate whose image is covered by stock-agency watermarks — "
-    "a logo or wordmark repeated across the picture, or one large mark over "
-    "the subject (Vecteezy, Alamy, Shutterstock, Dreamstime, Getty, "
-    "iStock, 123RF, Depositphotos and the like) — is UNUSABLE. Such a frame "
-    "goes to rejected_ids even when it matches the brief perfectly: the "
-    "lettering would be burned into the finished film. This overrides every "
-    "leniency rule below — never keep a watermarked frame because nothing "
-    "better is available. A single credit line or caption printed along an "
-    "edge, above or below the picture, is normal for archive material and "
-    "is NOT a watermark: archive photographs routinely carry the archive's "
-    "name, a photographer credit or a catalogue number along an edge, and "
-    "such a frame is perfectly usable. The test is WHERE the mark sits — "
-    "over the picture (unusable) or along its edge (fine).\n\n"
-)
 
 # Постерный режим: видео-кандидат показан ОДНИМ кадром (обложкой карточки).
 _SINGLE_FRAME_NOTE = (
@@ -528,11 +420,6 @@ _RANK_RULE = (
 )
 
 
-def is_stock_stage(stage: str) -> bool:
-    """Стоковая стадия? У неё свои источники и свои правила отбора."""
-    return (stage or "").split("/")[0].strip().lower() == "stock"
-
-
 # ── Свои запреты пользователя ───────────────────────────────────────────────
 #
 # Человек задаёт СВОИ правила отбора готовых кадров, не залезая в код: файл
@@ -618,26 +505,15 @@ def build_task(contract_json: str, *, stage: str = "", single_frame: bool = Fals
     проверить тестом напрямую, а не регуляркой по исходнику.
 
     Порядок блоков подчинён одному правилу: ПЕРВЫМ идёт то, что действительно
-    бракует. У стока дисквалификатора по водяным знакам НЕТ — там вместо него
-    послабление «метка на превью это норма», и отдавать ему самую сильную
-    позицию незачем: вижн и не собирался ничего браковать за метку. Поэтому у
-    стока первым встаёт запрет пользователя, а послабление уезжает вниз, к
-    остальным послаблениям. В прочих ветках дисквалификатор по водяным знакам
-    настоящий и написан со словом «первым» — его не трогаем, запрет
-    пользователя идёт сразу за ним. Оба всё равно оказываются выше
-    `_COMMON_RULES`, а спорить им не о чем: один про испорченный материал,
-    другой про содержание кадра.
+    бракует, — запрет пользователя; он оказывается выше `_COMMON_RULES` с их
+    послаблениями.
     """
     if house_rules is None:
         house_rules = load_house_rules(stage)
     house_block = build_house_rule(house_rules)
 
     parts: list[str] = []
-    if not is_stock_stage(stage):
-        parts.append(_WATERMARK_RULE)
-        if house_block:
-            parts.append(house_block)
-    elif house_block:
+    if house_block:
         parts.append(house_block)
     if single_frame:
         parts.append(_SINGLE_FRAME_NOTE)
@@ -676,13 +552,11 @@ def pick_with_vision(
     ранжированием запасным становится ВТОРОЕ МЕСТО по оценке вижна, а не
     случайный уцелевший кандидат.
     """
-    from units.operator_hub import CLI_AGENTS
-
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     empty = VisionVerdict(pick=None, rejected_ids=[], reasons={}, provider=provider, model=model)
-    # У CLI-агента своя модель из настроек режиссёра — пустое поле не порок.
-    if not provider or (not model and provider not in CLI_AGENTS):
+    # Модель может быть пустой: Codex возьмёт модель режиссёра.
+    if not provider:
         empty.error = "vision provider/model is not configured"
         return empty
     sheet = build_contact_sheet(candidates, work_dir / "contact_sheet.jpg")
@@ -724,9 +598,8 @@ def pick_with_vision(
     (work_dir / "vision_prompt.json").write_text(json.dumps(contract, ensure_ascii=False, indent=2), encoding="utf-8")
     (work_dir / "vision_task.txt").write_text(task, encoding="utf-8")
     logger.info(
-        "   [вижн/%s] %s/%s (%s) ← лист %s КБ, кандидатов %s%s%s",
+        "   [вижн/%s] %s/%s ← лист %s КБ, кандидатов %s%s%s",
         stage or "?", provider, model or "—",
-        "CLI-агент" if provider in CLI_AGENTS else "chat API",
         sheet.stat().st_size // 1024, len(candidates),
         f", запрос «{search_query[:40]}»" if search_query else "",
         f", свои запреты: {len(house_rules)}" if house_rules else "")

@@ -205,7 +205,7 @@ def _ask_codex(scene: Path, task: str, stop_event) -> Dict[str, Any]:
     code, out = _run(cmd, cwd=scene, stop_event=stop_event,
                      timeout=int(getattr(config, 'MOTION_GRAPHICS_CODEX_TIMEOUT', 900)),
                      # подписка Codex, как у режиссёра; прокси CODEX_PROXY подхватится
-                     env=config.codex_env_for_provider(provider='openai'))
+                     env=config.codex_env_for_provider())
     if not control.exists():
         raise RuntimeError(f'Codex не ответил (код {code}): {out[-400:].strip()}')
     try:

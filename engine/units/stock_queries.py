@@ -39,13 +39,6 @@ from units.scene_context import compact_context
 
 logger = logging.getLogger(__name__)
 
-# Провайдеры, работающие через прямой chat API (остальные — CLI-агенты)
-_CHAT_PROVIDERS = (
-    'deepseek', 'openrouter', 'meta_muse', 'claude_api',
-    'codex_reseller', 'gpt_nexus',
-)
-
-
 @dataclass
 class StockQuery:
     clip_id: int
@@ -59,52 +52,15 @@ class StockQuery:
     queries: List[str] = field(default_factory=list)
     local_file: str = ''          # путь из библиотеки; пусто = идём на сток
     # Трассировка для stock_query_log.json (отладка качества запросов):
-    query_by: str = ''            # 'codex/model' | 'deepseek/model' | 'voiceover-fallback'
+    query_by: str = ''            # 'codex/model' | 'voiceover-fallback'
     query_path: str = 'primary'   # 'primary' | 'fallback'
     fallback_reason: str = ''     # ошибка, на которой упал промптер (если fallback)
 
 
-def _provider() -> str:
-    """Кто пишет запросы к стоку. Имя возвращается В КАНОНЕ `text_operator`.
-
-    Раньше отсюда уходило `gpt` — так называется бэкенд режиссёра, но у
-    `text_operator` CLI-агент зовётся `codex`. Имя не попадало в список
-    CLI-агентов, уезжало в ветку chat API и падало с «Неизвестный chat-провайдер:
-    gpt». Прогон 01.09.2026: запросами к стоку стали куски озвучки, сток вернул
-    пусто, 5 клипов из 6 ушли в нейрогенерацию.
-    """
-    from units.operator_hub import normalize_provider
-
-    p = (getattr(config, 'STOCK_PROMPT_PROVIDER', '') or '').strip().lower()
-    if p and p != 'auto':
-        return normalize_provider(p)
-    # auto → тем же, кем размечал режиссёр; иначе прямой chat
-    d = (getattr(config, 'DIRECTOR_BACKEND', '') or '').strip().lower()
-    if d in ('gpt', 'openai'):
-        gp = (getattr(config, 'GPT_PROVIDER', '') or '').strip().lower()
-        return gp if gp in _CHAT_PROVIDERS else 'codex'
-    if d in _CHAT_PROVIDERS or d in ('codex', 'claude_code'):
-        return normalize_provider(d)
-    return 'codex'
-
-
-def _model(provider: str) -> str:
+def _model() -> str:
+    """Модель промптера стока: своя настройка, иначе модель режиссёра (Codex)."""
     m = (getattr(config, 'STOCK_PROMPT_MODEL', '') or '').strip()
-    if m:
-        return m
-    return {
-        'deepseek': getattr(config, 'DEEPSEEK_MODEL', ''),
-        'openrouter': getattr(config, 'OPENROUTER_MODEL', ''),
-        'claude_api': getattr(config, 'CLAUDE_API_MODEL', ''),
-        'codex_reseller': getattr(config, 'CODEX_RESELLER_MODEL', ''),
-        'gpt_nexus': getattr(config, 'GPT_NEXUS_MODEL', ''),
-        'meta_muse': getattr(config, 'META_MUSE_MODEL', ''),
-        # CLI-агенты: модель берётся из настроек режиссёра/Claude Code —
-        # раньше их тут не было, и `ask_text` получал пустую модель.
-        'codex': getattr(config, 'GPT_MODEL', ''),
-        'gpt': getattr(config, 'GPT_MODEL', ''),
-        'claude_code': getattr(config, 'CLAUDE_CODE_MODEL', ''),
-    }.get(provider, '')
+    return m or (getattr(config, 'GPT_MODEL', '') or '')
 
 
 def _parse_json_loose(raw: str) -> Any:
@@ -127,28 +83,6 @@ def _parse_json_loose(raw: str) -> Any:
             except Exception:
                 continue
     return None
-
-
-def _chat(provider: str, task: str, timeout: int = 300, *, phase: str = "stock_queries",
-          work_dir=None) -> str:
-    """Спросить оператора — любым транспортом (chat API или CLI-агент).
-
-    Раньше здесь был прямой `chat_completion`, и оператор-агент (Codex,
-    Claude Code) для стока просто не существовал: настройка выбиралась, а
-    вызова не происходило (улог 25.08)."""
-    from units.operator_hub import ask_text
-
-    model = _model(provider)
-    logging.info("   [сток/промптер] %s/%s ← задача %s символов",
-                 provider, model or "—", len(task))
-    raw = ask_text(
-        provider, model, task,
-        work_dir=Path(work_dir) if work_dir else Path.cwd(),
-        phase=phase, schema_file="stock_queries.json",
-        max_tokens=None, timeout=timeout,
-    ) or ''
-    logging.info("   [сток/промптер] ответ %s символов", len(raw))
-    return raw
 
 
 # ── Вызов 1: запросы + тип медиа ────────────────────────────────────────────
@@ -332,15 +266,12 @@ def generate_queries(clips: List[Dict[str, Any]], *, video_share: Optional[float
         # 0 — законное значение (весь сток — фото), поэтому не «or 0.70»
         video_share = getattr(config, 'STOCK_VIDEO_SHARE', None)
         video_share = 0.70 if video_share is None else max(0.0, min(1.0, float(video_share)))
-    provider = _provider()
+    provider = 'codex'
     task = _queries_prompt(clips, video_share, theme)
-    _by = f'{provider}/{_model(provider)}'
+    _by = f'{provider}/{_model()}'
 
     try:
-        if provider in _CHAT_PROVIDERS:
-            raw = _chat(provider, task)
-        else:
-            raw = _agent_run(provider, task, 'stock_queries.json')
+        raw = _agent_run(task, 'stock_queries.json')
         data = _parse_json_loose(raw)
         items = (data or {}).get('items') if isinstance(data, dict) else data
         if not items:
@@ -418,13 +349,10 @@ def match_local(queries: List[StockQuery], files: List[str]) -> Optional[Dict[in
     """
     if not queries or not files:
         return {}
-    provider = _provider()
+    provider = 'codex'
     task = _local_prompt(queries, files)
     try:
-        if provider in _CHAT_PROVIDERS:
-            raw = _chat(provider, task)
-        else:
-            raw = _agent_run(provider, task, 'stock_local_match.json')
+        raw = _agent_run(task, 'stock_local_match.json')
         data = _parse_json_loose(raw)
         if data is None:
             raise ValueError('непарсимый ответ')
@@ -458,22 +386,11 @@ def match_local(queries: List[StockQuery], files: List[str]) -> Optional[Dict[in
         return None                        # None ≠ {}: вызывающий включит python-фолбек
 
 
-# ── CLI-агенты (codex / claude_code) ────────────────────────────────────────
+# ── Вызов Codex ──────────────────────────────────────────────────────────────
 
-def _agent_run(provider: str, task: str, out_name: str) -> str:
-    """Спросить CLI-агента (Codex / Claude Code) через общий транспорт.
-
-    Раньше здесь стояли прямые импорты `units.codex_runner` и
-    `run_claude_code_task` — таких модулей в проекте НЕТ, поэтому ветка падала
-    всегда: при `STOCK_PROMPT_PROVIDER=codex` промптер стока валился с
-    «No module named 'units.codex_runner'», сток искал по сырой озвучке и не
-    находил ничего (прогон 26.08: 0 из 2 клипов, запрос — обрезанная фраза
-    из транскрипта).
-
-    Теперь идём через `text_operator.ask_text` — тем же путём, которым CLI-агента
-    зовут ютуб и Real Photo: он сам различает транспорт и сам решает, забрать
-    ответ последним сообщением или из файла.
-    """
+def _agent_run(task: str, out_name: str) -> str:
+    """Спросить Codex через общий транспорт (`operator_hub.ask_text`): он сам решает,
+    забрать ответ последним сообщением или из файла."""
     from units.operator_hub import ask_text
 
     work = Path(getattr(config, 'PROJECTS_DIR', '.')) / '_stock_prompt'
@@ -487,6 +404,6 @@ def _agent_run(provider: str, task: str, out_name: str) -> str:
               else 'stock_local_match.json')
     if not (Path(__file__).parent.parent / 'schemas' / schema).exists():
         schema = ''
-    return ask_text(provider, _model(provider), task,
+    return ask_text('codex', _model(), task,
                     work_dir=work, phase=phase, schema_file=schema,
                     max_tokens=1200, timeout=180)

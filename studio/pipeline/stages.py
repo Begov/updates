@@ -122,7 +122,7 @@ def direct_job(v: dict, project: Path) -> tuple[dict, dict] | None:
     if not style:
         return None
     two_pass = v["direction_mode"] == "2-pass"
-    conf = {"DIRECTOR_BACKEND": "gpt", "GPT_PROVIDER": "openai", "GPT_MODEL": v["gpt_model"],
+    conf = {"GPT_MODEL": v["gpt_model"],
             "DIRECTOR_TWO_PASS": two_pass, "INTRO_BLOCK_DURATION": int(v["intro_duration"]),
             "INTRO_CLIP_MIN_DURATION": int(v["intro_clip_min"]), "INTRO_CLIP_MAX_DURATION": int(v["intro_clip_max"])}
     if v["clip_mode"] == "slideshow":

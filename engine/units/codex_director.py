@@ -384,11 +384,7 @@ class GptDirector:
     """Режиссёрский анализ через GPT (Codex CLI)"""
 
     def __init__(self, model_name: Optional[str] = None):
-        # При DeepSeek/OpenRouter модель всегда 'moonbridge' (route в Moon Bridge), иначе GPT_MODEL/override
-        self.model_name = config.codex_model_for_provider(model_name or config.GPT_MODEL)
-        self._is_deepseek = config.gpt_provider_is_deepseek()
-        self._is_openrouter = config.gpt_provider_is_openrouter()
-        self._uses_moonbridge = config.gpt_provider_uses_moonbridge()
+        self.model_name = model_name or config.GPT_MODEL
         self.codex_exe = Path(config.CODEX_EXE_PATH)
         self.schemas_dir = Path(__file__).parent.parent / 'schemas'
         self.prompts_dir = Path(__file__).parent.parent / 'instructions'
@@ -399,12 +395,6 @@ class GptDirector:
 
         if not config.CODEX_EXE_PATH or not self.codex_exe.is_file():
             raise FileNotFoundError(f"Codex CLI не найден: {self.codex_exe}")
-
-        # DeepSeek/OpenRouter: гарантируем, что Moon Bridge (прокси Codex->chat/completions) поднят и
-        # codex config.toml сгенерён. Идемпотентно: если GUI уже поднял — мгновенно.
-        if self._uses_moonbridge:
-            from units import bridge_manager as _mb
-            _mb.ensure_ready()
 
     def _write_run_log(self, output_dir, project_name, audio_duration,
                        num_clips, num_prompts, *, two_pass=False,
@@ -809,25 +799,6 @@ class GptDirector:
         try:
             control = json.loads(raw)
         except json.JSONDecodeError as e:
-            # DeepSeek (через Moon Bridge) не соблюдает strict --output-schema:
-            # last-message приходит обычным текстом, а не JSON-control. Codex при
-            # этом реально пишет целевой файл на диск. Синтезируем control из
-            # последнего сообщения, чтобы Pass 1 читал montage_plan.json с диска.
-            if self._uses_moonbridge:
-                m = re.search(r'\{.*\}', raw, re.DOTALL)
-                if m:
-                    try:
-                        control = json.loads(m.group(0))
-                        logging.info("DeepSeek: control извлечён из текстового last-message")
-                        print("   ⏱  Codex(DeepSeek): control из текста")
-                        return control
-                    except json.JSONDecodeError:
-                        pass
-                status = 'error' if re.search(r'\berror\b', raw, re.IGNORECASE) and 'ok' not in raw.lower() else 'ok'
-                control = {'status': status, 'error_message': raw[:300]}
-                logging.warning(f"DeepSeek: schema не соблюдена, fallback control status={status}")
-                print(f"   ⏱  Codex(DeepSeek): schema-fallback status={status} (план читается с диска)")
-                return control
             logging.error(f"Invalid JSON in {result_file}: {raw[:500]}")
             raise RuntimeError(f"Codex вернул невалидный JSON: {e}")
 
@@ -970,8 +941,6 @@ class GptDirector:
         Запуск codex для Pass 2 — JSON stdout mode.
         GPT возвращает {"prompts":["p1","p2",...]} в stdout (через --output-last-message).
         Мы парсим JSON и сами записываем в prompts_path (append).
-        DeepSeek: если codex_home не задан — используем изолированный DeepSeek-home,
-        чтобы env и поиск session JSONL смотрели в одно место.
         0 tool calls = 0 context growth = быстро.
 
         При resume: codex exec resume SESSION_ID — контекст в сессии.
@@ -979,9 +948,6 @@ class GptDirector:
 
         Returns: (total_prompts_in_file, session_id)
         """
-        # DeepSeek: дефолтный изолированный CODEX_HOME (config.toml -> Moon Bridge)
-        if codex_home is None and self._is_deepseek:
-            codex_home = Path(config.DEEPSEEK_CODEX_HOME)
         # Truncate stem to avoid Windows MAX_PATH (260 chars) — long project names
         # with em dashes caused Codex to silently create 8.3 short names, breaking read.
         _stem = prompts_path.stem
@@ -1267,35 +1233,6 @@ class GptDirector:
                     logging.warning(f"Pass2 Codex final message without prompts: {_flat[:800]}")
                     print(f"   📄 Сырой ответ Codex (без промптов): {_shown}")
 
-        # DeepSeek fallback: модель иногда создаёт отдельный файл prompts.json вместо
-        # возврата JSON-массива через --output-last-message. Проверим рабочую директорию.
-        if not prompts_list and self._is_deepseek:
-            _prompt_files = list(working_dir.glob('*prompts*.json'))
-            _prompt_files = [f for f in _prompt_files if f.is_file() and f.stat().st_size > 0]
-            # Предпочесть prompts.json, если есть (он обычно валидный), иначе свежайший
-            _exact = working_dir / 'prompts.json'
-            if _exact.exists() and _exact.is_file():
-                _prompt_files = [_exact] + [f for f in _prompt_files if f != _exact]
-            elif _prompt_files:
-                _prompt_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
-            # Пробуем парсить каждый (первый валидный побеждает), пропускаем битые
-            for _pf in _prompt_files:
-                try:
-                    _data = json.loads(_pf.read_text(encoding='utf-8-sig', errors='replace'))
-                    if isinstance(_data, dict) and 'prompts' in _data:
-                        _raw_prompts = _data['prompts']
-                    elif isinstance(_data, list):
-                        _raw_prompts = _data
-                    else:
-                        continue
-                    prompts_list = self._parse_codex_prompts_text(json.dumps({'prompts': _raw_prompts}))
-                    if prompts_list:
-                        logging.info(f"Pass2 DeepSeek: recovered {len(prompts_list)} prompts from {_pf.name}")
-                        print(f"   ↩️  DeepSeek: восстановлено {len(prompts_list)} промптов из {_pf.name}")
-                        break
-                except Exception as e:
-                    logging.warning(f"Pass2 DeepSeek: failed to parse {_pf.name}: {e}")
-                    continue
 
         if not prompts_list:
             return prompts_offset, session_id, set()  # retry
@@ -1795,13 +1732,8 @@ Write the JSON file and then report your status in your final response."""
 
                 def _run_chunk(task_p, n_clips, offset):
                     _ch = Path(tempfile.mkdtemp(prefix=f'codex_p2_{_i}_'))
-                    if self._uses_moonbridge:
-                        # DeepSeek: копируем config.toml + models_catalog из изолированного home
-                        _codex_src = Path(config.DEEPSEEK_CODEX_HOME)
-                        _copy_files = ['config.toml', 'models_catalog.json']
-                    else:
-                        _codex_src = Path.home() / '.codex'
-                        _copy_files = ['auth.json', 'config.toml']
+                    _codex_src = Path.home() / '.codex'
+                    _copy_files = ['auth.json', 'config.toml']
                     for _cf in _copy_files:
                         _src = _codex_src / _cf
                         if _src.exists():
@@ -1824,7 +1756,7 @@ Write the JSON file and then report your status in your final response."""
                         _raw_dir = output_dir / 'raw_gpt'
                         _raw_dir.mkdir(exist_ok=True)
                         _today = datetime.now()
-                        _ch_root = Path(config.DEEPSEEK_CODEX_HOME) if self._is_deepseek else (Path.home() / '.codex')
+                        _ch_root = Path.home() / '.codex'
                         _sess_dir = _ch_root / 'sessions' / str(_today.year) / f'{_today.month:02d}' / f'{_today.day:02d}'
                         if _sess_dir.exists():
                             _candidates = sorted([f for f in _sess_dir.glob('rollout-*.jsonl')
@@ -2122,7 +2054,7 @@ Write the JSON file and then report your status in your final response."""
                     _raw_dir = output_dir / 'raw_gpt'
                     _raw_dir.mkdir(exist_ok=True)
                     _today = datetime.now()
-                    _ch_root = Path(config.DEEPSEEK_CODEX_HOME) if self._is_deepseek else (Path.home() / '.codex')
+                    _ch_root = Path.home() / '.codex'
                     _sess_dir = _ch_root / 'sessions' / str(_today.year) / f'{_today.month:02d}' / f'{_today.day:02d}'
                     _sess_files = list(_sess_dir.glob(f'*{_session_id[:16]}*.jsonl')) if _sess_dir.exists() else []
                     if not _sess_files:

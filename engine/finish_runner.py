@@ -64,8 +64,6 @@ def run_direction(project: Path, s: dict, prompts_only: bool) -> None:
     style = str(s.get("style_path") or "")
     if not style or not Path(style).is_file():
         raise RuntimeError("нет стайлгайда: выберите его в «Конвейере» (один на все)")
-    config.DIRECTOR_BACKEND = "gpt"
-    config.GPT_PROVIDER = "openai"
     config.GPT_MODEL = s.get("dir_gpt_model", config.GPT_MODEL)
     config.GPT_PASS2_CHUNK_SIZE = int(s.get("dir_gpt_chunk_size") or 0)
     if s.get("dir_gpt_parallel"):

@@ -4,7 +4,6 @@ SG Adapt — адаптирует мастер-стайлгайд под кон�
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import threading
 import time
@@ -36,21 +35,8 @@ def adapt_style_guide(
     prompts_dir = Path(__file__).parent.parent / 'instructions'
     prompt_template_path = prompts_dir / 'sg_adapt_prompt.txt'
     output_path = project_dir / 'style_guide_adapted.txt'
-    # Свой оператор адаптации: SG_ADAPT_BACKEND/SG_ADAPT_MODEL из .env.
-    # Пусто — работаем оператором режиссёра, как было раньше.
-    provider = (os.getenv('SG_ADAPT_BACKEND', '') or '').strip().lower()
-    if not provider or provider == 'auto':
-        provider = (getattr(config, 'GPT_PROVIDER', '') or 'openai').strip().lower()
-    model_override = (os.getenv('SG_ADAPT_MODEL', '') or '').strip()
-    chat_providers = {
-        'deepseek', 'openrouter', 'meta_muse', 'codex_reseller',
-        'gpt_nexus',
-    }
-
     # ── 1. Проверяем Codex ───────────────────────────────────────────────────
-    if provider not in chat_providers and (
-        not config.CODEX_EXE_PATH or not Path(config.CODEX_EXE_PATH).is_file()
-    ):
+    if not config.CODEX_EXE_PATH or not Path(config.CODEX_EXE_PATH).is_file():
         logging.warning(f"SG Adapt: Codex CLI не найден ({config.CODEX_EXE_PATH}), используем оригинальный SG")
         return original_sg_path
 
@@ -78,59 +64,6 @@ def adapt_style_guide(
 
     # ── 5. Собираем task prompt ──────────────────────────────────────────────
     task_prompt = prompt_template.replace('{original_sg}', original_sg_text).replace('{script_text}', script_text)
-
-    if provider in chat_providers:
-        from units import llm_gateway as chat_client
-
-        model = {
-            'deepseek': getattr(config, 'DEEPSEEK_MODEL', '') or 'deepseek-v4-flash',
-            'openrouter': getattr(config, 'OPENROUTER_MODEL', '') or 'openrouter/free',
-            'codex_reseller': (
-                getattr(config, 'CODEX_RESELLER_MODEL', '') or 'gpt-5.6-terra'
-            ),
-            'gpt_nexus': getattr(config, 'GPT_NEXUS_MODEL', '') or 'gpt-5.5',
-            'meta_muse': (
-                getattr(config, 'META_MUSE_MODEL', '')
-                or 'muse-spark-1.2-contributor'
-            ),
-        }[provider]
-        if model_override:
-            model = model_override
-        try:
-            result = chat_client.chat_completion(
-                provider,
-                model,
-                [{'role': 'user', 'content': task_prompt}],
-                max_tokens=None,
-                reasoning_level=getattr(
-                    config, 'CHAT_REASONING_LEVEL', 'medium'),
-                web=(
-                    provider == 'openrouter'
-                    and getattr(
-                        config, 'OPENROUTER_WEB_SEARCH', 'disabled'
-                    ) == 'enabled'
-                ),
-                json_mode=False,
-                timeout=getattr(config, 'GPT_DIRECTOR_TIMEOUT', 900),
-            ).strip()
-            if result.startswith('```') and result.endswith('```'):
-                result = result.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-            if len(result) < 100:
-                raise RuntimeError(
-                    'provider returned an empty or truncated style guide')
-            output_path.write_text(result, encoding='utf-8')
-            print(
-                f"  [OK] SG Adapt: {provider}/{model} -> "
-                f"{output_path.name}"
-            )
-            return str(output_path)
-        except Exception as exc:
-            logging.warning(
-                "SG Adapt via %s failed (%s), using original SG",
-                provider,
-                exc,
-            )
-            return original_sg_path
 
     # Пишем в файл (обход WinError 206 / длинные аргументы командной строки)
     task_file = project_dir / '_codex_sg_adapt_task.md'
@@ -172,9 +105,7 @@ def adapt_style_guide(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding='utf-8', errors='replace',
                 cwd=str(project_dir),
-                # provider='openai' — иначе при deepseek/openrouter CODEX_HOME уедет
-                # на домик Moon Bridge, чей прокси (:38440) давно не поднимается.
-                env=config.codex_env_for_provider(provider='openai'),  # прокси CODEX_PROXY
+                env=config.codex_env_for_provider(),  # прокси CODEX_PROXY
             )
 
             def _drain_stderr():

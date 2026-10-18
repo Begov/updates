@@ -1,5 +1,5 @@
 """
-Shared prompt rewriter for censorship bypass (Codex or a chat provider).
+Shared prompt rewriter for censorship bypass (Codex).
 
 Instruction template is loaded from:
     agent/prompts/rewrite_prompt.txt
@@ -121,14 +121,14 @@ def _call_gpt(model: str, instruction: str, timeout: Optional[int] = None) -> st
             '--output-last-message', result_file,
             '--dangerously-bypass-approvals-and-sandbox',
             '--skip-git-repo-check',
-            *config.codex_cli_args_for_provider('openai'),
+            *config.codex_cli_args_for_provider(),
             '-m', model,
         ]
         proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace',
             # "gpt:" uses the user's normal Codex subscription/auth.
-            env=config.codex_env_for_provider(provider='openai'),
+            env=config.codex_env_for_provider(),
             **NO_WINDOW,
         )
         _timeout = timeout if timeout is not None else getattr(config, 'GPT_REWRITE_TIMEOUT', 90)
@@ -191,31 +191,6 @@ def _call_gpt(model: str, instruction: str, timeout: Optional[int] = None) -> st
         return ''
 
 
-def _call_chat(provider: str, model: str, instruction: str) -> str:
-    """Rewrite через прямой chat API (deepseek | openrouter), без Codex/Moon Bridge.
-
-    БЕЗ reasoning (rewrite — быстрая переформулировка, COT не нужен и жрёт квоту).
-    БЕЗ json_mode (rewrite возвращает plain text — переписанный промпт).
-    """
-    try:
-        from units import llm_gateway as chat_client
-        import params as config
-        # web=False: rewrite не нуждается в интернете
-        text = chat_client.chat_completion(
-            provider, model,
-            [{"role": "user", "content": instruction}],
-            max_tokens=None,  # вывод не режем — провайдер отдаёт свой максимум
-            reasoning_level='off',
-            web=False,
-            json_mode=False,
-            timeout=getattr(config, 'GPT_REWRITE_TIMEOUT', 90),
-        )
-        return (text or '').strip()
-    except Exception as e:
-        logging.warning(f"{provider} rewrite failed: {e}")
-        return ''
-
-
 def _save_rewrite_debug(project_dir, clip_id, original: str, pass1: str, pass2: str, final: str):
     """Save rewrite debug info to project_dir/rewrite_debug.log if project_dir given."""
     if not project_dir:
@@ -262,22 +237,19 @@ def rewrite_prompt(original_prompt: str, project_dir=None, clip_id=None) -> str:
         logging.warning(f"Could not load config for rewrite: {e}")
         return original_prompt
 
-    # Parse REWRITE_MODEL: "provider:model", e.g. "gpt:gpt-5.4-mini"
-    chat_providers = ('deepseek', 'openrouter', 'meta_muse', 'codex_reseller', 'gpt_nexus')
+    # Parse REWRITE_MODEL: "provider:model", e.g. "gpt:gpt-5.4-mini". Переписывает Codex.
     rewrite_spec = getattr(config, 'REWRITE_MODEL', '') or 'gpt:gpt-5.4-mini'
     if ':' in rewrite_spec:
         provider, model = rewrite_spec.split(':', 1)
     else:
         provider, model = 'gpt', rewrite_spec
     provider = provider.lower().strip()
-    if provider != 'gpt' and provider not in chat_providers:
+    if provider != 'gpt':
         # провайдер из старых настроек, которого больше нет, — переписываем через Codex
         logging.warning(f"Rewrite provider '{provider}' is not supported — using Codex")
         provider, model = 'gpt', getattr(config, 'GPT_MODEL', '') or 'gpt-5.4-mini'
 
     def _call(instruction: str) -> str:
-        if provider in chat_providers:
-            return _call_chat(provider, model, instruction)
         return _call_gpt(model, instruction)
 
     prompt_snippet = original_prompt[:100].replace('\n', ' ')

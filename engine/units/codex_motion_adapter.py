@@ -19,61 +19,6 @@ from prompt_extract import find_prompts_file
 from units.proc_tools import NO_WINDOW
 
 
-_CHAT_PROVIDERS = {
-    'deepseek', 'openrouter', 'meta_muse', 'codex_reseller',
-    'gpt_nexus',
-}
-
-
-def _chat_model(provider: str, model_name: Optional[str]) -> str:
-    if model_name:
-        return model_name
-    return {
-        'deepseek': getattr(config, 'DEEPSEEK_MODEL', '') or 'deepseek-v4-flash',
-        'openrouter': getattr(config, 'OPENROUTER_MODEL', '') or 'openrouter/free',
-        'codex_reseller': (
-            getattr(config, 'CODEX_RESELLER_MODEL', '') or 'gpt-5.6-terra'
-        ),
-        'gpt_nexus': getattr(config, 'GPT_NEXUS_MODEL', '') or 'gpt-5.5',
-        'meta_muse': (
-            getattr(config, 'META_MUSE_MODEL', '')
-            or 'muse-spark-1.2-contributor'
-        ),
-    }[provider]
-
-
-def _strip_code_fence(text: str) -> str:
-    result = text.strip()
-    if result.startswith('```') and result.endswith('```'):
-        result = result.split('\n', 1)[-1].rsplit('```', 1)[0].strip()
-    return result
-
-
-def _save_chat_result(
-    result: str,
-    output_path: Path,
-    prompt_count: int,
-) -> int:
-    parts = [
-        ' '.join(part.split())
-        for part in result.split('\n\n')
-        if part.strip()
-    ]
-    if len(parts) < prompt_count:
-        raise RuntimeError(
-            f'provider returned {len(parts)} prompts, expected {prompt_count}'
-        )
-    if len(parts) > prompt_count:
-        logging.warning(
-            "[gpt-adapt] Count mismatch: %s vs %s; trimming extras",
-            len(parts),
-            prompt_count,
-        )
-        parts = parts[:prompt_count]
-    output_path.write_text('\n\n'.join(parts), encoding='utf-8')
-    return len(parts)
-
-
 def adapt_prompts_for_veo(
     project_dir: str,
     codex_exe: Optional[str] = None,
@@ -88,30 +33,19 @@ def adapt_prompts_for_veo(
         Путь к файлу с адаптированными промптами, или None при ошибке.
     """
     project_dir = Path(project_dir)
-    # Свой оператор VEO-адаптера: VEO_ADAPT_BACKEND/VEO_ADAPT_MODEL из .env.
-    # Пусто или auto — работаем оператором режиссёра, как было раньше.
-    provider = (os.getenv('VEO_ADAPT_BACKEND', '') or '').strip().lower()
-    if not provider or provider == 'auto':
-        provider = (getattr(config, 'GPT_PROVIDER', '') or 'openai').strip().lower()
+    # Модель VEO-адаптера: VEO_ADAPT_MODEL из .env, иначе модель режиссёра.
     model_name = (os.getenv('VEO_ADAPT_MODEL', '') or '').strip() or model_name
-    use_chat = provider in _CHAT_PROVIDERS
-    model = (
-        _chat_model(provider, model_name)
-        if use_chat
-        else (model_name or config.GPT_MODEL)
-    )
+    model = model_name or config.GPT_MODEL
     codex_path = codex_exe or config.CODEX_EXE_PATH
     codex_exe_path = Path(codex_path) if codex_path else None
     schemas_dir = Path(__file__).parent.parent / 'schemas'
     schema_path = schemas_dir / 'veo_adapt_control.json'
 
     # Validate prerequisites
-    if not use_chat and (
-        codex_exe_path is None or not codex_exe_path.exists()
-    ):
+    if codex_exe_path is None or not codex_exe_path.exists():
         print(f"  [codex-adapt] Codex CLI not found: {codex_path}")
         return None
-    if not use_chat and not schema_path.exists():
+    if not schema_path.exists():
         print(f"  [codex-adapt] Schema not found: {schema_path}")
         return None
 
@@ -151,70 +85,6 @@ def adapt_prompts_for_veo(
         print(f"  [codex-adapt] Prompt template not found: {prompt_template_path}")
         return None
 
-    if use_chat:
-        from units import llm_gateway as chat_client
-
-        task_prompt = task_prompt.replace(
-            f"Read the prompts file: {input_path.as_posix()}",
-            f"Use the inline prompts below:\n\n{raw}",
-        ).replace(
-            f"Write all {prompt_count} adapted prompts to: "
-            f"{output_path.as_posix()}",
-            f"Return only all {prompt_count} adapted prompts in your response.",
-        ).replace(
-            "Report status in your final response.",
-            "Do not add a status report, commentary, or code fences.",
-        )
-        logging.info(
-            "[gpt-adapt] Starting: provider=%s model=%s prompts=%s",
-            provider,
-            model,
-            prompt_count,
-        )
-        print(
-            f"  [gpt-adapt] Adapting {prompt_count} prompts with "
-            f"{provider}/{model}..."
-        )
-        t0 = time.time()
-        try:
-            result = chat_client.chat_completion(
-                provider,
-                model,
-                [{'role': 'user', 'content': task_prompt}],
-                max_tokens=None,
-                reasoning_level=getattr(
-                    config, 'CHAT_REASONING_LEVEL', 'medium'),
-                web=(
-                    provider == 'openrouter'
-                    and getattr(
-                        config, 'OPENROUTER_WEB_SEARCH', 'disabled'
-                    ) == 'enabled'
-                ),
-                json_mode=False,
-                timeout=timeout,
-            )
-            adapted_count = _save_chat_result(
-                _strip_code_fence(result),
-                output_path,
-                prompt_count,
-            )
-        except Exception as exc:
-            logging.error(
-                "[gpt-adapt] %s/%s failed: %s",
-                provider,
-                model,
-                exc,
-            )
-            print(f"  [gpt-adapt] Failed: {exc}")
-            return None
-
-        elapsed = time.time() - t0
-        print(
-            f"  [gpt-adapt] Done: {adapted_count} prompts in "
-            f"{elapsed:.0f}s -> {output_path.name}"
-        )
-        return str(output_path)
-
     # Build command
     cmd = [
         str(codex_exe_path), 'exec',
@@ -240,10 +110,7 @@ def adapt_prompts_for_veo(
             encoding='utf-8',
             **NO_WINDOW,
             errors='replace',
-            # provider='openai': эта ветка идёт через подписку Codex. Без явного
-            # провайдера при GPT_PROVIDER=deepseek/openrouter подменяется CODEX_HOME
-            # на домик Moon Bridge, а тот прокси давно не поднимается.
-            env=config.codex_env_for_provider(provider='openai'),  # прокси CODEX_PROXY
+            env=config.codex_env_for_provider(),  # прокси CODEX_PROXY
         )
     except subprocess.TimeoutExpired:
         print(f"  [codex-adapt] Timeout ({timeout}s) — using original prompts")
