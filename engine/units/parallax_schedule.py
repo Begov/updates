@@ -114,7 +114,7 @@ def eligible_clips(
     """Отмеченные галками клипы в порядке плана: [(clip_id, группа), ...].
 
     Учитываем НАМЕРЕНИЕ режиссёра, а не только закрытые клипы: пока стадия
-    качает, у клипа промежуточный маркер (`stock_pending` / `real_photo_pending`),
+    качает, у клипа промежуточный маркер (`stock_pending`),
     а если материал не нашёлся — маркер снимут вовсе. Считая только по готовым,
     мы получали бы каждый круг новый список, и «каждый N-й» ездил бы по ролику.
     """
@@ -123,8 +123,6 @@ def eligible_clips(
     allowed = set(sources) if sources is not None else set(photo_sources())
     if 'stock_photo' in allowed:
         allowed.add('stock_pending')
-    if 'real_photo' in allowed:
-        allowed.add('real_photo_pending')
     take_ai = ai_enabled() if include_ai is None else bool(include_ai)
 
     out: List[Tuple[int, str]] = []

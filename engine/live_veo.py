@@ -146,13 +146,13 @@ def main():
         print("[ERROR] No clips in montage_plan.json")
         sys.exit(1)
     from units.source_ledger import VIDEO_SKIP_SOURCES
-    real_photo_ids = {
+    external_ids = {
         c['id'] for c in clips_data
         if c.get('source') in VIDEO_SKIP_SOURCES
     }
-    if real_photo_ids:
-        all_clip_ids = [cid for cid in all_clip_ids if cid not in real_photo_ids]
-        print(f"  [Real Photo] Skipping {len(real_photo_ids)} clips claimed by archival stage")
+    if external_ids:
+        all_clip_ids = [cid for cid in all_clip_ids if cid not in external_ids]
+        print(f"  [External] Skipping {len(external_ids)} clips with ready-made sources (stock, graphics)")
 
     # --- Vislide filter: каждый N-й клип + intro block → i2v ---
     vislide_interval = args.vislide_interval
@@ -161,7 +161,7 @@ def main():
         # Force intro block clips
         intro_dur = config.INTRO_BLOCK_DURATION
         intro_ids = {c['id'] for c in clips_data if c.get('startTime', 0) < intro_dur}
-        intro_ids -= real_photo_ids
+        intro_ids -= external_ids
         animated_ids |= intro_ids
         print(f"  [Vislide] interval={vislide_interval}, intro={intro_dur}s ({len(intro_ids)} clips): "
               f"{len(animated_ids)}/{len(all_clip_ids)} clips will be animated")

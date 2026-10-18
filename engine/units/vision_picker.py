@@ -312,9 +312,7 @@ def vision_capable(provider: str) -> bool:
 def resolve_vision_provider(stage: str) -> tuple[str, str]:
     """(провайдер, модель) вижна для стадии — СВОЯ настройка, потом общий фолбэк.
 
-      • real_photo / epf → REAL_PHOTO_VISION_PROVIDER + REAL_PHOTO_VISION_MODEL
-      • stock            → STOCK_VISION_PROVIDER + STOCK_VISION_MODEL, пусто =
-                           «как у Real Photo»
+      • stock → STOCK_VISION_PROVIDER + STOCK_VISION_MODEL
     Всё это выбирается в GUI, руками в .env лезть не нужно.
     """
     import params as config
@@ -334,12 +332,7 @@ def resolve_vision_provider(stage: str) -> tuple[str, str]:
         return provider, model or _model_for(provider)
 
     stage = (stage or "").split("/")[0].strip().lower()
-    chain = (
-        [("STOCK_VISION_PROVIDER", "STOCK_VISION_MODEL"),
-         ("REAL_PHOTO_VISION_PROVIDER", "REAL_PHOTO_VISION_MODEL")]
-        if stage == "stock" else
-        [("REAL_PHOTO_VISION_PROVIDER", "REAL_PHOTO_VISION_MODEL")]
-    )
+    chain = [("STOCK_VISION_PROVIDER", "STOCK_VISION_MODEL")] if stage == "stock" else []
     for provider_key, model_key in chain:
         provider, model = _pair(provider_key, model_key)
         if provider:
@@ -383,7 +376,7 @@ def _ask_vision(provider: str, model: str, task: str, sheet: Path,
                 raise RuntimeError("claude_code vision: result file was not created")
             return result_file.read_text(encoding="utf-8-sig", errors="replace")
 
-        from units.archive_photos import CodexRunner
+        from units.codex_runner import CodexRunner
 
         runner = CodexRunner(model_name=model or None, timeout=300)
         # Схема отдаёт reasons списком пар: у structured output нет произвольных
@@ -555,7 +548,7 @@ def is_stock_stage(stage: str) -> bool:
 _HOUSE_RULES_FILE = "vision_house_rules.txt"
 
 # Секции по стадиям: пусто/`[all]` — на все стадии, остальные — только на свою.
-_HOUSE_SECTION_STAGES = {"stock": "stock", "real_photo": "real_photo"}
+_HOUSE_SECTION_STAGES = {"stock": "stock"}
 
 
 def _house_rules_path() -> Path:
@@ -567,7 +560,7 @@ def load_house_rules(stage: str = "", path: Optional[Path] = None) -> list[str]:
     """Строки запретов пользователя для этой стадии. Нет файла — пустой список.
 
     Формат простой: по одному предмету на строку, строки с `#` — комментарии.
-    Необязательные секции `[all]`, `[stock]`, `[real_photo]`;
+    Необязательные секции `[all]`, `[stock]`;
     строки до первой секции считаются общими.
     """
     src = Path(path) if path is not None else _house_rules_path()

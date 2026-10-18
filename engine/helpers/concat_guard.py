@@ -2,7 +2,7 @@
 
 Перед запуском склейки все клипы монтажного плана должны иметь медиа:
 видео в vid_img/, картинку в generated/ или файл, указанный в плане. Фоновые
-стадии (Real Photo, сток) могут дописывать план — поэтому склейка ждёт их.
+стадии (сток) могут дописывать план — поэтому склейка ждёт их.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def load_clips(project: Path) -> list:
     return plan.get("clips", [])
 
 
-def _real_photo_image(project: Path, clip_id: int) -> Optional[Path]:
+def _generated_image(project: Path, clip_id: int) -> Optional[Path]:
     gen = project / "generated"
     for fmt in (f"{clip_id:03d}", str(clip_id)):
         for ext in IMAGE_EXTS:
@@ -52,7 +52,7 @@ def clip_media_exists(project: Path, clip: dict) -> bool:
         for candidate in ([cfp] if cfp.is_absolute() else [project / cfp, cfp]):
             if candidate.exists() and candidate.stat().st_size > 1000:
                 return True
-    return _real_photo_image(project, int(clip_id)) is not None
+    return _generated_image(project, int(clip_id)) is not None
 
 
 def readiness(project: Path) -> tuple[bool, str]:
@@ -61,26 +61,13 @@ def readiness(project: Path) -> tuple[bool, str]:
     clips = load_clips(project)
     if not clips:
         return False, "montage_plan has no clips"
-    pending = [int(c["id"]) for c in clips if c.get("source") == "real_photo_pending" and "id" in c]
-    if pending:
-        return False, f"RealPhoto still pending: {pending[:12]}"
-    missing_img, missing_meta, missing = [], [], []
+    missing = []
     for clip in clips:
         cid = clip.get("id")
         if cid is None:
             continue
-        cid = int(cid)
-        if clip.get("source") == "real_photo":
-            if _real_photo_image(project, cid) is None:
-                missing_img.append(cid)
-            if not clip.get("real_meta"):
-                missing_meta.append(cid)
         if not clip_media_exists(project, clip):
-            missing.append(cid)
-    if missing_img:
-        return False, f"RealPhoto images missing: {missing_img[:12]}"
-    if missing_meta:
-        return False, f"RealPhoto metadata missing: {missing_meta[:12]}"
+            missing.append(int(cid))
     if missing:
         return False, f"Media missing for clips: {missing[:12]}"
     return True, f"ready ({len(clips)} clips)"
@@ -128,8 +115,7 @@ def static_backfill(project: Path, log: Callable[[str, str], None]) -> list[int]
             if cid is None or not src or src == "infographic":
                 continue
             cid = int(cid)
-            if (cid in recovered or (src.endswith("_pending") and clip_media_exists(project, clip))
-                    or (src == "real_photo" and not clip.get("real_meta") and clip_media_exists(project, clip))):
+            if cid in recovered or (src.endswith("_pending") and clip_media_exists(project, clip)):
                 clip.pop("source", None)
                 cleared.append(cid)
         if cleared:

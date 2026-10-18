@@ -100,8 +100,8 @@ def schema_is_control(schema_file: str) -> bool:
 def resolve_text_operator(stage: str = "") -> tuple[str, str]:
     """(провайдер, модель) для текстовой задачи стадии.
 
-    Порядок: настройка самой стадии → оператор режиссёра (в т.ч. Codex) →
-    промптер Real Photo как последний рабочий вариант. «auto» и пустое значение
+    Порядок: настройка самой стадии → оператор режиссёра (в т.ч. Codex).
+    «auto» и пустое значение
     настройкой не считаются."""
     import params as config
     def _clean(value) -> str:
@@ -110,8 +110,6 @@ def resolve_text_operator(stage: str = "") -> tuple[str, str]:
 
     stage_keys = {
         "stock": ("STOCK_PROMPT_PROVIDER", "STOCK_PROMPT_MODEL"),
-        "real_photo": ("REAL_PHOTO_PROMPT_PROVIDER", "REAL_PHOTO_PROMPT_MODEL"),
-        "style_extract": ("STYLE_EXTRACT_BACKEND", "STYLE_EXTRACT_MODEL"),
     }
     candidates: list[tuple[str, str]] = []
     provider_key, model_key = stage_keys.get((stage or "").lower(), ("", ""))
@@ -126,8 +124,6 @@ def resolve_text_operator(stage: str = "") -> tuple[str, str]:
     if backend == "gpt" and director in ("", "openai", "codex", "gpt"):
         director = "codex"
     candidates.append((director, ""))
-    candidates.append((_clean(getattr(config, "REAL_PHOTO_PROMPT_PROVIDER", "")),
-                       str(getattr(config, "REAL_PHOTO_PROMPT_MODEL", "") or "").strip()))
     for provider, model in candidates:
         if not provider:
             continue
@@ -216,7 +212,7 @@ def ask_text(
             if code != 0:
                 raise RuntimeError(f"claude_code failed ({code}): {(err or out)[-300:]}")
         else:
-            from units.archive_photos import CodexRunner
+            from units.codex_runner import CodexRunner
 
             runner = CodexRunner(model_name=model or None, timeout=timeout)
             # Codex работает по схеме вывода: без неё он волен ответить чем угодно.

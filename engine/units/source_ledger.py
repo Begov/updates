@@ -1,44 +1,27 @@
 """
-clip_sources.py — единый реестр маркеров `source` в montage_plan.json.
+source_ledger — единый реестр маркеров `source` в montage_plan.json.
 
-Клип с любым из этих маркеров обслуживает ВНЕШНЯЯ стадия (архив или сток), а не
-нейрогенерация. ImgGen / FastGen / Veo / FlowUltra обязаны такие клипы пропускать:
+Клип с любым из этих маркеров обслуживает ВНЕШНЯЯ стадия (сток, моушн-графика,
+обложка), а не нейрогенерация. ImgGen / FastGen / Veo обязаны такие клипы пропускать:
 иначе картинка сгенерится поверх скачанной — конфликт файлов и сожжённая квота,
 причём молча.
 
-Зачем модуль: литерал ('real_photo', 'real_photo_pending', 'real_video') был
-скопирован в 7 файлов. Добавление нового источника требовало не забыть ни один —
+Зачем модуль: литералы маркеров были скопированы в 7 файлов. Добавление нового источника требовало не забыть ни один —
 забыл хоть один, получил двойную генерацию без единой ошибки в логе. Теперь точка
 правды одна.
 
 Значения маркеров
 -----------------
-Real Photo stage (архивные материалы: Wikipedia/NASA/LoC/Archive/Yandex/...):
-  real_photo_pending — режиссёр пометил клип, стадия ещё не отработала
-  real_photo         — архивное ФОТО скачано (лежит в generated/{id:03d}.{ext})
-  real_video         — архивное ВИДЕО готово (лежит в vid_img/{id:03d}.mp4)
-                       (видео-путь сейчас отключён, маркер зарезервирован)
-
-Stock stage (Pexels / Pixabay / Coverr — современный постановочный футаж):
+Stock stage (своя папка / Pexels / Pixabay — современный постановочный футаж):
   stock_pending      — режиссёр пометил клип, стадия ещё не отработала
   stock_photo        — сток-ФОТО скачано (generated/{id:03d}.{ext}; concat сам
                        сделает Ken Burns)
   stock_video        — сток-ВИДЕО готово (vid_img/{id:03d}.mp4; уже обрезано под
                        длину клипа, zoom не нужен)
-
-Сток и архив намеренно РАЗНЫЕ маркеры: у них разные источники, лицензии и смысл
-(архив — исторический материал, сток — современная съёмка), и разные стадии.
 """
 from __future__ import annotations
 
-# Архивная стадия (real_photo.py)
-REAL_PHOTO_SOURCES = frozenset({
-    'real_photo',
-    'real_photo_pending',
-    'real_video',
-})
-
-# Стоковая стадия (Pexels/Pixabay/Coverr)
+# Стоковая стадия (своя папка / Pexels / Pixabay)
 STOCK_SOURCES = frozenset({
     'stock_pending',
     'stock_photo',
@@ -83,10 +66,16 @@ FILLER_SOURCES = frozenset({
 # Всё, что НЕ должно попасть в нейрогенерацию.
 # Именно этот набор проверяют ImgGen/FastGen/Veo/watch_i2v.
 # Обложка здесь же: её картинка пришла файлом от пользователя, рисовать нечего.
-EXTERNAL_SOURCES = (REAL_PHOTO_SOURCES | STOCK_SOURCES
-                    | COVER_SOURCES | MOTION_GRAPHICS_SOURCES | FILLER_SOURCES)
+# Сцена, которую не закрыл свой источник (например, упали все генераторы
+# инфографики): генераторы её пропускают, медиа подложит Pre-concat fallback.
+FALLBACK_SOURCES = frozenset({
+    'fallback_pending',
+})
 
-# Everything that must skip Veo / Flow Ultra / i2v watchers. Infographics are
+EXTERNAL_SOURCES = (STOCK_SOURCES | COVER_SOURCES | MOTION_GRAPHICS_SOURCES
+                    | FILLER_SOURCES | FALLBACK_SOURCES)
+
+# Everything that must skip Veo / i2v watchers. Infographics are
 # generated as still images by a dedicated image route, then concat decides
 # whether to retain the still frame or apply the optional motion treatment.
 VIDEO_SKIP_SOURCES = EXTERNAL_SOURCES | INFOGRAPHIC_SOURCES
@@ -94,25 +83,20 @@ VIDEO_SKIP_SOURCES = EXTERNAL_SOURCES | INFOGRAPHIC_SOURCES
 # Клипы, чей материал кладётся в vid_img/ готовым видео (concat берёт как фрагмент,
 # Ken Burns не применяется).
 VIDEO_SOURCES = frozenset({
-    'real_video',
     'stock_video',
-    'youtube',
-    'youtube_video',
     'motion_graphics',
 })
 
 # Клипы, чей материал кладётся картинкой в generated/ (concat делает Ken Burns).
-PHOTO_SOURCES = frozenset({'real_photo', 'stock_photo', 'infographic',
-                          'cover', 'filler_photo'})
+PHOTO_SOURCES = frozenset({'stock_photo', 'infographic', 'cover', 'filler_photo'})
 
-# Auto Visual Story can selectively animate only these already-downloaded
-# documentary/still sources with the VEO parallax route.
-AUTO_VISUAL_PARALLAX_PHOTO_SOURCES = frozenset({'real_photo', 'stock_photo'})
+# Готовые фото, которые параллакс может оживлять (по галкам пользователя).
+PARALLAX_PHOTO_SOURCES = frozenset({'stock_photo'})
 
 # Готовые картинки, которые РАЗРЕШЕНО отправлять в оживление. Стадия видео по
 # метке источника решает, кого пропустить как готовый материал, а кого пустить
 # в i2v; всё остальное внешнее едет в склейку статикой.
-ANIMATABLE_STILL_SOURCES = AUTO_VISUAL_PARALLAX_PHOTO_SOURCES | frozenset({'cover'})
+ANIMATABLE_STILL_SOURCES = PARALLAX_PHOTO_SOURCES | frozenset({'cover'})
 
 
 def parallax_photo_sources() -> frozenset:
@@ -121,14 +105,12 @@ def parallax_photo_sources() -> frozenset:
     Галки стоят рядом с самим параллаксом в GUI. Нейрокадры сюда не входят:
     они и так проходят обычный i2v, и за них отвечает галка «AI» внутри
     генератора. Здесь только источники, которые генератор иначе пропустил бы
-    как внешние (сток и архивные фото).
+    как внешние (сток).
     """
     import params as config
     selected = set()
     if getattr(config, 'VEONONSTOP_I2V_PARALLAX_STOCK', False):
         selected.add('stock_photo')
-    if getattr(config, 'VEONONSTOP_I2V_PARALLAX_REAL_PHOTO', False):
-        selected.add('real_photo')
     return frozenset(selected)
 
 # Still sources that must be rendered by concat without a Ken Burns movement
@@ -139,13 +121,8 @@ STATIC_NO_MOTION_SOURCES = INFOGRAPHIC_SOURCES
 def clip_media_ready(project_dir, clip) -> bool:
     """Есть ли у клипа готовый файл.
 
-    Одна проверка на всех, кто решает судьбу маркера: интро-гейт (снимать
-    маркер нельзя — сцену сгенерируют заново поверх готовой) и защита режима
-    «только не-AI» (объявлять сцену нерешённой нельзя — она уже закрыта).
-    Раньше жила вложенной в `apply_intro_gate`, и защита Non-AI такой проверки
-    не имела вовсе: клип 10 прогона 26.08 EPF закрыл, а защита вернула ему
-    `real_photo_pending` — склейка перестала считать кадр архивным и выпустила
-    его без подписи источника.
+    Одна проверка на всех, кто решает судьбу маркера: например, интро-гейт
+    (снимать маркер нельзя — сцену сгенерируют заново поверх готовой).
     """
     from pathlib import Path
 
@@ -194,9 +171,7 @@ def final_marker_for(project_dir, clip, stage: str) -> str | None:
     """Финальный маркер для клипа с УЖЕ готовым файлом.
 
     `*_pending` означает «стадия ещё не отработала». Когда файл на диске, такой
-    маркер врёт: склейка не узнаёт архивный кадр (нет подписи источника и
-    blur-заливки, `PHOTO_SOURCES` его не содержит), а повторный запуск шлёт
-    стадию искать заново поверх готового.
+    маркер врёт: повторный запуск шлёт стадию искать заново поверх готового.
 
     Видео в `vid_img/` → видео-маркер стадии, картинка в `generated/` → фото.
     Стадия неизвестна или файла нет — None, вызывающий не трогает маркер.
@@ -226,10 +201,7 @@ def final_marker_for(project_dir, clip, stage: str) -> str | None:
         or _clip_parts_on_disk(project, clip_id, clip)
     )
     finals = {
-        'real_photo': ('real_video', 'real_photo'),
         'stock': ('stock_video', 'stock_photo'),
-        # У ютуба картинки не бывает: стадия кладёт только видеофрагмент.
-        'youtube': ('youtube', 'youtube'),
         'infographic': ('infographic', 'infographic'),
         # Графика бывает только видео
         'motion_graphics': ('motion_graphics', 'motion_graphics'),
@@ -374,12 +346,7 @@ def apply_stage_intro_gates(project_dir, printer=print) -> dict:
     «images missing» → i2v его пропустил).
 
     Гейты идемпотентны: повторный вызов внутри самой стадии маркеров уже не
-    найдёт и ничего не сделает, поэтому вызовы там оставлены — стадию можно
-    запускать и отдельным BAT, мимо пайплайна.
-
-    Real Photo сюда не входит: у него свой гейт по СПИСКУ отобранных клипов
-    (`RealPhotoProcessor._apply_intro_gate`), а не по маркерам в плане, и его
-    стадия отбора и так идёт синхронно до генерации.
+    найдёт и ничего не сделает, поэтому вызовы там оставлены.
 
     Возвращает {'stock': [ids], 'infographic': [ids], 'motion_graphics': [ids]} —
     с кого снят маркер.
@@ -429,22 +396,18 @@ def log_source_markup(clips, printer=print) -> None:
     чтобы не гадать, почему сток-стадия не оставила ни одного файла (она молча
     выходит при нуле помеченных клипов)."""
     import params as config
-    rp_on = bool(getattr(config, 'REAL_PHOTO_ENABLED', False))
     st_on = bool(getattr(config, 'STOCK_ENABLED', False))
     ig_on = bool(getattr(config, 'INFOGRAPHIC_ENABLED', False))
     mg_on = bool(getattr(config, 'MOTION_GRAPHICS_ENABLED', False))
-    if not (rp_on or st_on or ig_on or mg_on):
+    if not (st_on or ig_on or mg_on):
         return
     clips = clips or []
-    n_rp = sum(1 for c in clips if c.get('source') in REAL_PHOTO_SOURCES)
     n_st = sum(1 for c in clips if c.get('source') in STOCK_SOURCES)
     n_ig = sum(1 for c in clips if c.get('source') in INFOGRAPHIC_SOURCES)
     n_mg = sum(1 for c in clips if c.get('source') in MOTION_GRAPHICS_SOURCES)
     total = len(clips) or 1
     # (подпись, сколько размечено, целевая доля, ключ настройки)
     rows: List[tuple] = []
-    if rp_on:
-        rows.append(("Real Photo", n_rp, float(getattr(config, 'REAL_PHOTO_RATIO_TARGET', 0) or 0)))
     if st_on:
         rows.append(("Сток", n_st, float(getattr(config, 'STOCK_RATIO_TARGET', 0) or 0)))
     if ig_on:
@@ -455,7 +418,7 @@ def log_source_markup(clips, printer=print) -> None:
     n_hold = sum(1 for c in clips if c.get('source') in FILLER_SOURCES)
     if n_hold:
         rows.append(("Удержание", n_hold, -1.0))
-    marked = n_rp + n_st + n_ig + n_mg + n_hold
+    marked = n_st + n_ig + n_mg + n_hold
     rows.append(("Нейрогенерация", max(0, len(clips) - marked), -1.0))
 
     _BAR = 22          # длина полосы

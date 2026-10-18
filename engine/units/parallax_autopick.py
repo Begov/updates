@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import params as config
-from units.source_ledger import AUTO_VISUAL_PARALLAX_PHOTO_SOURCES
+from units.source_ledger import PARALLAX_PHOTO_SOURCES
 
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
@@ -218,7 +218,7 @@ def watch_parallax(
     # умолчании держатся ручные запуски и тесты. Галки приходят сюда явным
     # аргументом из пайплайна.
     _sources = (set(sources) if sources is not None
-                else set(AUTO_VISUAL_PARALLAX_PHOTO_SOURCES))
+                else set(PARALLAX_PHOTO_SOURCES))
     plan = _px_plan.load(project)
     if plan is None:
         plan = _px_plan.build(project, sources=_sources,

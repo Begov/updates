@@ -485,9 +485,8 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
     except Exception as exc:
         print(f"  [Infographic] Generation failed: {exc}")
         logging.debug(traceback.format_exc())
-        # Инфографика — ПОСЛЕДНЕЕ звено цепочки: в режиме «только не-AI» за
-        # ней никого нет, и упавший провайдер оставлял сцену пустой. Пробуем
-        # остальных доступных, прежде чем сдаться (требование 26.08).
+        # Упавший провайдер не должен оставлять сцену пустой: пробуем остальных
+        # доступных, прежде чем сдаться (требование 26.08).
         _tried = {provider}
         for _next, _ready in (
             ('cinai', bool(getattr(config, 'CINAI_ACCESS_TOKEN', ''))),
@@ -528,27 +527,25 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
                 _tried.add(_next)
                 print(f"  [Infographic] запасной {_next} тоже не смог: {_exc2}")
         else:
-            # Все генераторы легли. Возвращаем сцены АРХИВАМ — это
-            # последний рабочий путь (требование 26.08). Помечаем
-            # `infographic_failed`, чтобы архивы не отправили их в
-            # инфографику повторно: иначе получится петля
-            # EPF → Wikimedia → инфографика → EPF.
+            # Все генераторы легли. Сцены уходят в Pre-concat fallback
+            # (`fallback_pending`): генераторы их пропускают, а перед склейкой
+            # fallback закроет их обычной картинкой или кадром соседа.
             print("  [Infographic] ни один генератор не отработал — "
-                  "возвращаю сцены архивам (real_photo_pending)")
+                  "сцены уйдут в добор перед склейкой (fallback_pending)")
             try:
                 from units.source_ledger import apply_clip_source_delta
 
                 apply_clip_source_delta(
                     Path(p_dir) / 'montage_plan.json',
-                    {int(cid): {'source': 'real_photo_pending',
+                    {int(cid): {'source': 'fallback_pending',
                                 'infographic_failed': True}
                      for cid in target_ids},
                     log=lambda message: print(f"  [Infographic] {message}"),
                 )
             except Exception as _delta_exc:          # noqa: BLE001
-                print(f"  [Infographic] не смог вернуть сцены архивам: {_delta_exc}")
+                print(f"  [Infographic] не смог отдать сцены добору: {_delta_exc}")
             return {'generated': 0, 'failed': len(target_ids), 'results': [],
-                    'error': str(exc), 'returned_to_archives': list(target_ids)}
+                    'error': str(exc), 'returned_to_fallback': list(target_ids)}
 
     materialize_static_images(p_dir)
     print(f"  [Infographic] Done: {result.get('generated', 0)} images -> generated/ + vid_img/")
@@ -574,7 +571,6 @@ def _run_post_pipeline_silent(
         external_stages_enabled = any(
             os.environ.get(key, '').lower() in ('1', 'true', 'yes', 'on')
             for key in (
-                'REAL_PHOTO_ENABLED',
                 'STOCK_ENABLED',
                 'INFOGRAPHIC_ENABLED',
                 'MOTION_GRAPHICS_ENABLED',
@@ -586,7 +582,7 @@ def _run_post_pipeline_silent(
 
     # ── Формат кадра ролика (16:9 / 9:16) ──────────────────────────────────
     # Единый источник — VEONONSTOP_ASPECT_RATIO (радио Ratio в GUI). От него
-    # считаются целевые размеры для Real Photo / Stock —
+    # считаются целевые размеры для стока —
     # раньше тут были захардкожены 1920x1080 и вертикальный ролик получал
     # горизонтальные стадии.
     _frame_ar = (config.VEONONSTOP_ASPECT_RATIO or '16:9').strip()
@@ -609,76 +605,9 @@ def _run_post_pipeline_silent(
         logging.exception("Stage intro gates failed for %s: %s",
                           project_dir, _gate_exc)
 
-    # ── Real Photo stage (between Director output and ImgGen/Veo) ──────────
-    # Triggered by env var REAL_PHOTO_ENABLED=1 (set by GUI / .env).
-    # Phase 1 (selector): синхронно — Codex picks clips, marks `source: real_photo_pending`
-    # в montage_plan. ImgGen/Veo читают marker и пропускают эти клипы.
-    # Phase 2 (downloads): daemon thread — параллельно с ImgGen скачивает фото в generated/{id}.png.
-    # Перед video_concat (и перед i2v, если он запущен ПОСЛЕ) поток джойнится.
-    _real_photo_thread = None
-    _real_photo_holder = [None]   # mutable container for summary
-    _real_photo_proc = None       # processor instance — needed для thread'а
-    _real_photo_selections = None
-    import threading as _rp_threading
-    _real_photo_stop = _rp_threading.Event()  # сигнал "видео готово — стоп загрузку"
-    if os.environ.get('REAL_PHOTO_ENABLED', '0').lower() in ('1', 'true', 'yes'):
-        try:
-            from units.archive_photos import RealPhotoProcessor
-            from pathlib import Path as _PathRP
-            print()
-            print("  " + "=" * 56)
-            print("  REAL PHOTO STAGE — archival photo selector (sync)")
-            print("  " + "=" * 56)
-            _rp_target = float(os.environ.get('REAL_PHOTO_RATIO_TARGET',
-                                              getattr(config, 'REAL_PHOTO_RATIO_TARGET', 0.40)))
-            _rp_min    = float(os.environ.get('REAL_PHOTO_RATIO_MIN',
-                                              getattr(config, 'REAL_PHOTO_RATIO_MIN', 0.30)))
-            _rp_max    = float(os.environ.get('REAL_PHOTO_RATIO_MAX',
-                                              getattr(config, 'REAL_PHOTO_RATIO_MAX', 0.55)))
-            _rp_srcs_raw = os.environ.get('REAL_PHOTO_SOURCES', '')
-            if 'REAL_PHOTO_SOURCES' in os.environ:
-                _rp_srcs = [s.strip() for s in _rp_srcs_raw.split(',') if s.strip()]
-            else:
-                _rp_srcs = getattr(config, 'REAL_PHOTO_SOURCES',
-                                   ['wikimedia', 'nasa', 'loc', 'met'])
-            _real_photo_proc = RealPhotoProcessor(
-                project_dir=_PathRP(project_dir),
-                target_ratio=_rp_target, min_ratio=_rp_min, max_ratio=_rp_max,
-                sources=_rp_srcs,
-                codex_model=getattr(config, 'REAL_PHOTO_CODEX_MODEL', None),
-                target_w=_frame_w, target_h=_frame_h,
-                fps=getattr(config, 'VIDEO_FPS', 60),
-            )
-            _real_photo_selections = _real_photo_proc.select_phase()
-            if _real_photo_selections:
-                # Spawn background thread for downloads — parallel with ImgGen.
-                # Общий deadline защищает от вечного зависания; после нейрогенерации
-                # _wait_real_photo даёт EPF отдельную короткую фору перед fallback.
-                import threading as _rp_th
-                import time as _rp_time
-                _rp_deadline = _rp_time.time() + int(getattr(config, 'REAL_PHOTO_WAIT_TIMEOUT', 1800))
-                def _rp_worker():
-                    try:
-                        _real_photo_holder[0] = _real_photo_proc.process_phase(
-                            _real_photo_selections, stop_event=_real_photo_stop, deadline_ts=_rp_deadline)
-                    except Exception as _rpe:
-                        print(f"  [Real Photo] BG download failed: {_rpe}")
-                        logging.debug(traceback.format_exc())
-                        _real_photo_holder[0] = {'error': str(_rpe)}
-                _real_photo_thread = _rp_th.Thread(target=_rp_worker, daemon=True, name='real-photo-bg')
-                _real_photo_thread.start()
-                _rp_to_min = int(getattr(config, 'REAL_PHOTO_WAIT_TIMEOUT', 1800)) // 60
-                _rp_tail_wait = max(
-                    0, int(getattr(config, 'REAL_PHOTO_PIPELINE_WAIT_TIMEOUT', 100))
-                )
-                print(f"  [Real Photo] Background download started for {len(_real_photo_selections)} clips")
-                print(f"  [Real Photo] Качает параллельно генерации; после генерации ждём ещё "
-                      f"{_rp_tail_wait}с, общий лимит {_rp_to_min} мин\n")
-            else:
-                print("  [Real Photo] No clips selected — skipping\n")
-        except Exception as e:
-            print(f"  [Real Photo] Selector failed (continuing pipeline): {e}")
-            logging.debug(traceback.format_exc())
+    # Фоновые стадии (сток, моушн-графика, параллакс) — свои потоки; общий стоп-сигнал
+    import threading as _bg_threading
+    _stages_stop = _bg_threading.Event()   # «видео готово — стоп загрузку»
 
     # ── Stock stage (между Director и ImgGen/Veo) ──────────────────────────
     # Клипы уже размечены режиссёром в Pass 1 (`source: stock_pending`) — свой
@@ -711,7 +640,7 @@ def _run_post_pipeline_silent(
                         _PathST(project_dir),
                         target_w=_frame_w, target_h=_frame_h,
                         fps=getattr(config, 'VIDEO_FPS', 60),
-                        stop_event=_real_photo_stop,   # общая стоп-кнопка пайплайна
+                        stop_event=_stages_stop,   # общая стоп-кнопка пайплайна
                         deadline_ts=_st_deadline,
                     )
                 except Exception as _ste:
@@ -737,7 +666,7 @@ def _run_post_pipeline_silent(
     # не вышло, подберёт Pre-concat fallback по промпту Pass 2 — как у стока.
     _mograph_thread = None
     _mograph_holder = [None]
-    _mograph_stop = _rp_threading.Event()
+    _mograph_stop = _bg_threading.Event()
     if getattr(config, 'MOTION_GRAPHICS_ENABLED', False):
         try:
             from units.mograph_runner import run_motion_graphics_stage
@@ -756,7 +685,7 @@ def _run_post_pipeline_silent(
             print("  " + "=" * 56)
             print("  MOTION GRAPHICS STAGE — Codex + Remotion (background)")
             print("  " + "=" * 56)
-            _mograph_thread = _rp_threading.Thread(target=_mograph_worker, daemon=True,
+            _mograph_thread = _bg_threading.Thread(target=_mograph_worker, daemon=True,
                                                    name='mograph-bg')
             _mograph_thread.start()
         except Exception as e:
@@ -770,7 +699,7 @@ def _run_post_pipeline_silent(
     # Вотчер не ждёт конца стадий: список «каждый N-й» считается сразу по плану,
     # а кадры уходят на оживление по мере появления картинок.
     _parallax_thread = None
-    _parallax_stop = _rp_threading.Event()
+    _parallax_stop = _bg_threading.Event()
     _vq_keys: list = []          # ключи видеоочереди; пусто = очередь не поднялась
     # ── Общая очередь генерации видео на прогон ────────────────────────────
     # Рабочие нанимаются ОДИН раз, и все поставщики задач кладут работу сюда:
@@ -902,7 +831,7 @@ def _run_post_pipeline_silent(
                         print(f"  [Параллакс] вотчер упал: {str(_pxe)[:200]}")
                         logging.debug(traceback.format_exc())
 
-                _parallax_thread = _rp_threading.Thread(
+                _parallax_thread = _bg_threading.Thread(
                     target=_parallax_worker, daemon=True, name='parallax-bg')
                 _parallax_thread.start()
                 _px_names = ', '.join(
@@ -988,11 +917,11 @@ def _run_post_pipeline_silent(
                 from units.source_quota import ai_allowed as _ws_ai
                 print(f"  [Stock] {label}: стоп загрузку (недокачанные → "
                       + ("догенерация по промпту)" if _ws_ai() else "запасной путь без нейрогенерации)"))
-                _real_photo_stop.set()
+                _stages_stop.set()
                 _stock_thread.join(timeout=120)   # грейс на завершение текущего клипа
             if _stock_thread.is_alive():
-                print("  [Stock] wait expired; unresolved clips remain non-AI pending")
-                _real_photo_stop.set()
+                print("  [Stock] wait expired; unresolved clips go to fallback")
+                _stages_stop.set()
                 _stock_thread.join(timeout=15)
         st = _stock_holder[0]
         if isinstance(st, dict) and not st.get('error') and st.get('total'):
@@ -1035,59 +964,6 @@ def _run_post_pipeline_silent(
         _mograph_thread = None
 
 
-    def _wait_real_photo(*, label="i2v"):
-        """Give Real Photo a bounded final window before enabling AI fallback."""
-        nonlocal _real_photo_thread
-        if _real_photo_thread is None:
-            return
-        if _real_photo_thread.is_alive():
-            _rp_tail_wait = max(0, int(
-                getattr(
-                    config,
-                    'REAL_PHOTO_PIPELINE_WAIT_TIMEOUT',
-                    100,
-                )
-            ))
-            # Сторож тишины (как у стока и ютуба). Прежние 100 секунд были
-            # особенно жестоки: EPF ищет по 20-40 секунд на клип, и три сцены
-            # уже не укладывались. Ждём, пока стадия закрывает кадры, обрываем
-            # по молчанию; старый ключ — верхний предел.
-            _rp_idle = max(60, int(getattr(config, 'REAL_PHOTO_IDLE_TIMEOUT', 300)))
-            _rp_hard = _rp_tail_wait * 10 if _rp_tail_wait else 0
-            print(f"  [Real Photo] {label}: жду, пока EPF закрывает кадры "
-                  f"(обрыв после {_rp_idle}с тишины)")
-            _rp_started = time.time()
-            _rp_last = time.time()
-            _rp_seen = _stage_media_count(project_dir)
-            while _real_photo_thread.is_alive():
-                _real_photo_thread.join(timeout=15)
-                _rp_now = _stage_media_count(project_dir)
-                if _rp_now != _rp_seen:
-                    _rp_seen = _rp_now
-                    _rp_last = time.time()
-                    continue
-                _rp_quiet = time.time() - _rp_last
-                if _rp_quiet >= _rp_idle:
-                    print(f"  [Real Photo] {label}: тишина {int(_rp_quiet)}с — "
-                          f"стадия ничего не закрывает, останавливаю")
-                    break
-                if _rp_hard and (time.time() - _rp_started) >= _rp_hard:
-                    print(f"  [Real Photo] {label}: верхний предел {_rp_hard}с исчерпан")
-                    break
-        if _real_photo_thread.is_alive():
-            print("  [Real Photo] финальный wait истёк — стоп остаток, "
-                  "недокачанные → догенерация")
-            _real_photo_stop.set()
-            _real_photo_thread.join(timeout=15)
-            if _real_photo_thread.is_alive():
-                print("  [Real Photo] поток не завершился за 15с после стопа — иду дальше")
-        rp = _real_photo_holder[0]
-        if rp and 'rendered' in rp:
-            print(f"  [Real Photo] Done: {rp.get('rendered', 0)}/{rp.get('selected', 0)} rendered "
-                  f"({rp.get('downloaded_mb', 0)} MB)")
-        elif rp and 'error' in rp:
-            print(f"  [Real Photo] WARNING: download failed: {rp.get('error')}")
-        _real_photo_thread = None  # idempotent: future calls no-op
 
     p_dir = str(project_dir)
     ar = config.VEONONSTOP_ASPECT_RATIO
@@ -2123,226 +1999,221 @@ def _run_post_pipeline_silent(
         # Музыка идёт отдельным фоновым процессом и в сводке не появлялась —
         # пользователь не знал, сделалась она или нет. Читаем её статус-файл.
 
-        _wait_real_photo(label="pipeline finish")
         _wait_stock(label="pipeline finish")
         _wait_mograph(label="pipeline finish")
 
         # Pre-concat fallback: догенерить картинкой ЛЮБОЙ клип без медиа.
         # Ловим по ФАКТУ отсутствия медиа (нет vid_img/{id} И нет generated/{id}), а НЕ по
-        # source-маркеру — потому что real_photo при провале сам делает revert (убирает source).
-        # Так покрываем всё: pending без фото, revert'нутые провалы, упавшую генерацию,
-        # недокачанный сток (внутри снимается ЛЮБОЙ source, включая stock_*).
+        # source-маркеру: так покрываем всё — упавшую генерацию, недокачанный сток,
+        # сцены инфографики без генератора (внутри снимается ЛЮБОЙ source).
         # Промпт уже есть из Pass 2 (промпты пишутся и для помеченных клипов).
-        # Вход по ОБОИМ флагам: раньше висел только на REAL_PHOTO_PROMPT_FALLBACK — выключи
-        # его юзер, и недокачанные сток-клипы остались бы помеченными → дырки в ролике.
-        if (getattr(config, 'REAL_PHOTO_PROMPT_FALLBACK', True)
-                or getattr(config, 'STOCK_PROMPT_FALLBACK', True)):
-            try:
-                import json as _rpj
-                _mp_path = Path(project_dir) / 'montage_plan.json'
-                _gen_dir = Path(project_dir) / 'generated'
-                _vid_dir = Path(project_dir) / 'vid_img'
+        # Выполняется всегда: без него сцены без медиа остались бы дырками в ролике.
+        try:
+            import json as _fbj
+            _mp_path = Path(project_dir) / 'montage_plan.json'
+            _gen_dir = Path(project_dir) / 'generated'
+            _vid_dir = Path(project_dir) / 'vid_img'
 
-                def _clip_has_vid_media(cid):
-                    for _fmt in (f"{cid:03d}", str(cid)):
-                        for _e in ('mp4', 'mov', 'png', 'jpg', 'jpeg', 'webp'):
-                            _f = _vid_dir / f"{_fmt}.{_e}"
-                            if _f.exists() and _f.stat().st_size > 1000:
-                                return True
-                    return False
+            def _clip_has_vid_media(cid):
+                for _fmt in (f"{cid:03d}", str(cid)):
+                    for _e in ('mp4', 'mov', 'png', 'jpg', 'jpeg', 'webp'):
+                        _f = _vid_dir / f"{_fmt}.{_e}"
+                        if _f.exists() and _f.stat().st_size > 1000:
+                            return True
+                return False
 
-                def _clip_has_generated_image(cid):
-                    for _fmt in (f"{cid:03d}", str(cid)):
-                        for _e in ('png', 'jpg', 'jpeg', 'webp'):
-                            _f = _gen_dir / f"{_fmt}.{_e}"
-                            if _f.exists() and _f.stat().st_size > 1000:
-                                return True
-                    return False
+            def _clip_has_generated_image(cid):
+                for _fmt in (f"{cid:03d}", str(cid)):
+                    for _e in ('png', 'jpg', 'jpeg', 'webp'):
+                        _f = _gen_dir / f"{_fmt}.{_e}"
+                        if _f.exists() and _f.stat().st_size > 1000:
+                            return True
+                return False
 
-                def _clip_has_media(cid):
-                    return _clip_has_vid_media(cid) or _clip_has_generated_image(cid)
+            def _clip_has_media(cid):
+                return _clip_has_vid_media(cid) or _clip_has_generated_image(cid)
 
-                if _mp_path.exists():
-                    _mp = _rpj.loads(_mp_path.read_text(encoding='utf-8-sig'))
-                    _mp_plan = _mp.get('montage_plan', _mp)
-                    _undelivered, _infographic_missing, _changed = [], [], False
-                    # «Удержание»: режиссёр решил, что сцене не подходит ни один источник
-                    # (нейрогенерации нет) — ей сразу кадр соседа, без повтора стока.
-                    from units.source_quota import HOLD_SOURCE as _fb_hold_src
-                    _hold = []
-                    for _c in _mp_plan.get('clips', []):
-                        _cid = _c.get('id')
-                        if _cid is None:
+            if _mp_path.exists():
+                _mp = _fbj.loads(_mp_path.read_text(encoding='utf-8-sig'))
+                _mp_plan = _mp.get('montage_plan', _mp)
+                _undelivered, _infographic_missing, _changed = [], [], False
+                # «Удержание»: режиссёр решил, что сцене не подходит ни один источник
+                # (нейрогенерации нет) — ей сразу кадр соседа, без повтора стока.
+                from units.source_quota import HOLD_SOURCE as _fb_hold_src
+                _hold = []
+                for _c in _mp_plan.get('clips', []):
+                    _cid = _c.get('id')
+                    if _cid is None:
+                        continue
+                    _cid = int(_cid)
+                    if not _clip_has_media(_cid):
+                        if _c.get('source') == 'infographic':
+                            _infographic_missing.append(_cid)
                             continue
-                        _cid = int(_cid)
-                        if not _clip_has_media(_cid):
-                            if _c.get('source') == 'infographic':
-                                _infographic_missing.append(_cid)
-                                continue
-                            if _c.get('source') == _fb_hold_src:
-                                _hold.append(_cid)
-                                continue
-                            _undelivered.append(_cid)
-                            # снять real_photo маркер если остался (иначе imggen отфильтрует клип)
-                            if _c.pop('source', None) is not None:
-                                _changed = True
-                    if _changed:
-                        _mp_path.write_text(_rpj.dumps(_mp, ensure_ascii=False, indent=2), encoding='utf-8')
-                    if _infographic_missing:
-                        _ims = sorted(_infographic_missing)
-                        print(f"\n  [Infographic fallback] {len(_ims)} static clips without media -> dedicated retry: "
-                              f"{_ims[:10]}{'...' if len(_ims) > 10 else ''}")
-                        _run_infographic_images_here(_ims)
-                    # Нейрогенерация запрещена («Состав видео» без неё или картинки
-                    # и видео «Пропустить»): сцены без медиа НЕ отдаём нейросетям.
-                    # Сначала сток ещё раз — без вижна и без требования субъекта,
-                    # потом кадр соседнего клипа. Дыр в ролике нет.
-                    from units.source_quota import ai_allowed as _fb_ai_allowed
-                    if _hold and _fb_ai_allowed():
-                        # метка от прогона без нейрогенерации, а теперь она есть
-                        for _c in _mp_plan.get('clips', []):
-                            if _c.get('id') is not None and int(_c['id']) in _hold:
-                                _c.pop('source', None)
-                        _mp_path.write_text(_rpj.dumps(_mp, ensure_ascii=False, indent=2), encoding='utf-8')
-                        _undelivered += _hold
-                        _hold = []
-                    if (_undelivered or _hold) and not _fb_ai_allowed():
-                        if _hold:
-                            print(f"\n  [Без нейрогенерации] {len(_hold)} сцен(ы) на удержании "
-                                  f"(режиссёр не нашёл подходящего источника): "
-                                  f"{sorted(_hold)[:10]}{'...' if len(_hold) > 10 else ''}")
-                        if _undelivered:
-                            print(f"\n  [Без нейрогенерации] {len(_undelivered)} сцен(ы) без медиа: "
-                                  f"{sorted(_undelivered)[:10]}{'...' if len(_undelivered) > 10 else ''}")
-                        if _undelivered and os.environ.get('STOCK_ENABLED', 'false').lower() in ('1', 'true', 'yes'):
-                            try:
-                                from units.source_ledger import apply_clip_source_delta as _fb_delta
-                                from units.stock_runner import run_stock_stage as _fb_stock
-                                _fb_delta(_mp_path, {int(c): {'source': 'stock_pending'}
-                                                     for c in _undelivered})
-                                print("  [Без нейрогенерации] повтор стока: без вижна и без "
-                                      "требования субъекта")
-                                _fb_stock(Path(project_dir), target_w=_frame_w, target_h=_frame_h,
-                                          fps=getattr(config, 'VIDEO_FPS', 60), relaxed=True)
-                            except Exception as _fbs:             # noqa: BLE001
-                                print(f"  [Без нейрогенерации] повтор стока не удался: {_fbs}")
-                                logging.debug(traceback.format_exc())
-                            _undelivered = [c for c in _undelivered if not _clip_has_media(c)]
-                        # удержания — после повтора стока: у соседей больше готовых кадров
-                        if _undelivered or _hold:
-                            from units.source_quota import fill_without_ai as _fb_fill
-                            _fb_fill(project_dir, _undelivered + _hold)
-                        _undelivered = []             # нейро-ветки ниже не нужны
+                        if _c.get('source') == _fb_hold_src:
+                            _hold.append(_cid)
+                            continue
+                        _undelivered.append(_cid)
+                        # снять маркер источника, если остался (иначе imggen отфильтрует клип)
+                        if _c.pop('source', None) is not None:
+                            _changed = True
+                if _changed:
+                    _mp_path.write_text(_fbj.dumps(_mp, ensure_ascii=False, indent=2), encoding='utf-8')
+                if _infographic_missing:
+                    _ims = sorted(_infographic_missing)
+                    print(f"\n  [Infographic fallback] {len(_ims)} static clips without media -> dedicated retry: "
+                          f"{_ims[:10]}{'...' if len(_ims) > 10 else ''}")
+                    _run_infographic_images_here(_ims)
+                # Нейрогенерация запрещена («Состав видео» без неё или картинки
+                # и видео «Пропустить»): сцены без медиа НЕ отдаём нейросетям.
+                # Сначала сток ещё раз — без вижна и без требования субъекта,
+                # потом кадр соседнего клипа. Дыр в ролике нет.
+                from units.source_quota import ai_allowed as _fb_ai_allowed
+                if _hold and _fb_ai_allowed():
+                    # метка от прогона без нейрогенерации, а теперь она есть
+                    for _c in _mp_plan.get('clips', []):
+                        if _c.get('id') is not None and int(_c['id']) in _hold:
+                            _c.pop('source', None)
+                    _mp_path.write_text(_fbj.dumps(_mp, ensure_ascii=False, indent=2), encoding='utf-8')
+                    _undelivered += _hold
+                    _hold = []
+                if (_undelivered or _hold) and not _fb_ai_allowed():
+                    if _hold:
+                        print(f"\n  [Без нейрогенерации] {len(_hold)} сцен(ы) на удержании "
+                              f"(режиссёр не нашёл подходящего источника): "
+                              f"{sorted(_hold)[:10]}{'...' if len(_hold) > 10 else ''}")
                     if _undelivered:
-                        _us = sorted(_undelivered)
-                        # Догенерация идёт ТЕМ ЖЕ генератором, что выбран для проекта
-                        # (PIPELINE_IMG_GEN — та же настройка, по которой ветвится основной
-                        # пайплайн на 1824). Раньше был хардкод VeoNonStop: проект на FastGen
-                        # получал догенерацию через VeoNonStop (чужие ключи/стиль), а при
-                        # banana_ref без рефов imggen падал.
-                        _fb_src = (os.environ.get('PIPELINE_IMG_GEN')
-                                   or getattr(config, 'PIPELINE_IMG_GEN', 'veononstop') or 'veononstop').lower()
+                        print(f"\n  [Без нейрогенерации] {len(_undelivered)} сцен(ы) без медиа: "
+                              f"{sorted(_undelivered)[:10]}{'...' if len(_undelivered) > 10 else ''}")
+                    if _undelivered and os.environ.get('STOCK_ENABLED', 'false').lower() in ('1', 'true', 'yes'):
+                        try:
+                            from units.source_ledger import apply_clip_source_delta as _fb_delta
+                            from units.stock_runner import run_stock_stage as _fb_stock
+                            _fb_delta(_mp_path, {int(c): {'source': 'stock_pending'}
+                                                 for c in _undelivered})
+                            print("  [Без нейрогенерации] повтор стока: без вижна и без "
+                                  "требования субъекта")
+                            _fb_stock(Path(project_dir), target_w=_frame_w, target_h=_frame_h,
+                                      fps=getattr(config, 'VIDEO_FPS', 60), relaxed=True)
+                        except Exception as _fbs:             # noqa: BLE001
+                            print(f"  [Без нейрогенерации] повтор стока не удался: {_fbs}")
+                            logging.debug(traceback.format_exc())
+                        _undelivered = [c for c in _undelivered if not _clip_has_media(c)]
+                    # удержания — после повтора стока: у соседей больше готовых кадров
+                    if _undelivered or _hold:
+                        from units.source_quota import fill_without_ai as _fb_fill
+                        _fb_fill(project_dir, _undelivered + _hold)
+                    _undelivered = []             # нейро-ветки ниже не нужны
+                if _undelivered:
+                    _us = sorted(_undelivered)
+                    # Догенерация идёт ТЕМ ЖЕ генератором, что выбран для проекта
+                    # (PIPELINE_IMG_GEN — та же настройка, по которой ветвится основной
+                    # пайплайн на 1824). Раньше был хардкод VeoNonStop: проект на FastGen
+                    # получал догенерацию через VeoNonStop (чужие ключи/стиль), а при
+                    # banana_ref без рефов imggen падал.
+                    _fb_src = (os.environ.get('PIPELINE_IMG_GEN')
+                               or getattr(config, 'PIPELINE_IMG_GEN', 'veononstop') or 'veononstop').lower()
 
-                        # ВИДЕОРЕЖИМ t2v: догоняем сцену ВИДЕО, а не картинкой.
-                        # Пользователь выбирает t2v в том числе тогда, когда у него
-                        # кончилась квота на картинки; лезть в этот момент в imggen
-                        # значит сломать прогон в самом конце — сцены останутся
-                        # дырками, хотя видеоквота цела. Признак — выбранный режим
-                        # видео t2v ЛИБО выключенная картиночная генерация
-                        # (PIPELINE_IMG_GEN=skip): рисовать всё равно нечем.
-                        _vid_mode = str(os.environ.get('PIPELINE_VIDEO_MODE')
-                                        or getattr(config, 'PIPELINE_VIDEO_MODE', '')
-                                        or '').strip().lower()
-                        if _vid_mode == 't2v' or _fb_src == 'skip':
-                            print(f"\n  [Pre-concat fallback] {len(_us)} клипов без медиа → "
-                                  f"догенерация ВИДЕО через t2v "
-                                  f"(режим видео={_vid_mode or '—'}, картинки={_fb_src}): "
-                                  f"{_us[:10]}{'...' if len(_us) > 10 else ''}")
-                            try:
-                                _t2v_fb = veo_generate_all_videos(
-                                    project_dir=p_dir,
-                                    mode='t2v',
-                                    clip_ids=_undelivered,
-                                    max_parallel=int(getattr(config, 'VEONONSTOP_MAX_PARALLEL', 12) or 12),
-                                    aspect_ratio=getattr(config, 'VEONONSTOP_ASPECT_RATIO', '16:9'),
-                                )
-                                print(f"  [Pre-concat fallback] t2v: "
-                                      f"ok={_t2v_fb.get('generated', 0)}")
-                            except Exception as _t2v_exc:      # noqa: BLE001
-                                # Видео не вышло — картинка всё ещё лучше дырки,
-                                # поэтому падаем в обычную ветку ниже.
-                                print(f"  [Pre-concat fallback] t2v не отработал ({_t2v_exc}) "
-                                      f"→ пробую картинкой")
-                            else:
-                                _undelivered = [c for c in _undelivered if not _clip_has_media(c)]
-                                if not _undelivered:
-                                    print("  [Pre-concat fallback] t2v закрыл все сцены — "
-                                          "картинки не нужны")
-                                else:
-                                    _us = sorted(_undelivered)
-                                    print(f"  [Pre-concat fallback] после t2v осталось "
-                                          f"{len(_us)} — добираю картинкой")
-                    # Картиночная догенерация: либо режим не t2v, либо t2v закрыл
-                    # не всё. Пустой список означает, что добирать уже нечего.
-                    if _undelivered:
-                        _us = sorted(_undelivered)
-                        print(f"\n  [Pre-concat fallback] {len(_us)} клипов без медиа → догенерация картинкой "
-                              f"(без анимации, генератор={_fb_src}): "
+                    # ВИДЕОРЕЖИМ t2v: догоняем сцену ВИДЕО, а не картинкой.
+                    # Пользователь выбирает t2v в том числе тогда, когда у него
+                    # кончилась квота на картинки; лезть в этот момент в imggen
+                    # значит сломать прогон в самом конце — сцены останутся
+                    # дырками, хотя видеоквота цела. Признак — выбранный режим
+                    # видео t2v ЛИБО выключенная картиночная генерация
+                    # (PIPELINE_IMG_GEN=skip): рисовать всё равно нечем.
+                    _vid_mode = str(os.environ.get('PIPELINE_VIDEO_MODE')
+                                    or getattr(config, 'PIPELINE_VIDEO_MODE', '')
+                                    or '').strip().lower()
+                    if _vid_mode == 't2v' or _fb_src == 'skip':
+                        print(f"\n  [Pre-concat fallback] {len(_us)} клипов без медиа → "
+                              f"догенерация ВИДЕО через t2v "
+                              f"(режим видео={_vid_mode or '—'}, картинки={_fb_src}): "
                               f"{_us[:10]}{'...' if len(_us) > 10 else ''}")
                         try:
-                            if _fb_src == 'cinai' and getattr(config, 'CINAI_ACCESS_TOKEN', ''):
-                                _fb_result = cinai_generate_all_images(
-                                    project_dir=p_dir,
-                                    clip_ids=_undelivered,
-                                    max_parallel=getattr(config, 'CINAI_MAX_PARALLEL', 6),
-                                    model=config.CINAI_MODEL,
-                                    aspect_ratio=getattr(config, 'CINAI_ASPECT_RATIO', '16:9'),
-                                    quality=getattr(config, 'CINAI_QUALITY', '1K'),
-                                    silent=True,
-                                )
-                                print(f"  [Pre-concat fallback] CinAI: "
-                                      f"ok={_fb_result.get('generated', 0)} "
-                                      f"failed={_fb_result.get('failed', 0)}")
-                            elif _fb_src == 'fastgen' and getattr(config, 'FASTGEN_API_KEY', ''):
-                                from units.fastgen_engine import generate_all_images as _fg_gen
-                                _fb_api, _fb_dual, _fb_slot = _resolve_fastgen_slot(
-                                    imggen_key_slot, allow_dual=True)
-                                _fb_result = _fg_gen(
-                                    project_dir=p_dir,
-                                    clip_ids=_undelivered,
-                                    api_key=_fb_api,
-                                    dual_key=_fb_dual,
-                                    silent=True,
-                                    preflight=False,
-                                )
-                                print(f"  [Pre-concat fallback] FastGen slot={_fb_slot}: "
-                                      f"ok={_fb_result.get('generated', 0)} "
-                                      f"failed={_fb_result.get('failed', 0)}")
+                            _t2v_fb = veo_generate_all_videos(
+                                project_dir=p_dir,
+                                mode='t2v',
+                                clip_ids=_undelivered,
+                                max_parallel=int(getattr(config, 'VEONONSTOP_MAX_PARALLEL', 12) or 12),
+                                aspect_ratio=getattr(config, 'VEONONSTOP_ASPECT_RATIO', '16:9'),
+                            )
+                            print(f"  [Pre-concat fallback] t2v: "
+                                  f"ok={_t2v_fb.get('generated', 0)}")
+                        except Exception as _t2v_exc:      # noqa: BLE001
+                            # Видео не вышло — картинка всё ещё лучше дырки,
+                            # поэтому падаем в обычную ветку ниже.
+                            print(f"  [Pre-concat fallback] t2v не отработал ({_t2v_exc}) "
+                                  f"→ пробую картинкой")
+                        else:
+                            _undelivered = [c for c in _undelivered if not _clip_has_media(c)]
+                            if not _undelivered:
+                                print("  [Pre-concat fallback] t2v закрыл все сцены — "
+                                      "картинки не нужны")
                             else:
-                                # veononstop (или неизвестный источник → безопасный дефолт)
-                                from units.veo_stills import generate_all_images as _rp_imggen
-                                _rp_mode = (getattr(config, 'VEONONSTOP_IMGGEN_MODE', 'imagen') or 'imagen').strip()
-                                # banana_ref/banana2_ref грузят style-reference из project/ref/.
-                                # Для догенерации одиночных клипов рефов может не быть → imggen
-                                # кинет ошибку. Проверяем и откатываемся на imagen.
-                                if _rp_mode in ('banana_ref', 'banana2_ref'):
-                                    _ref_dir = Path(project_dir) / 'ref'
-                                    _has_refs = _ref_dir.is_dir() and any(
-                                        p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')
-                                        for p in _ref_dir.iterdir() if p.is_file()
-                                    )
-                                    if not _has_refs:
-                                        print(f"  [Pre-concat fallback] режим {_rp_mode}, но в project/ref/ нет "
-                                              f"рефов → откат на imagen")
-                                        _rp_mode = 'imagen'
-                                _rp_imggen(project_dir=p_dir, mode=_rp_mode, clip_ids=_undelivered,
-                                           silent=True, preflight=False)
-                        except Exception as _ge:
-                            print(f"  [Pre-concat fallback] ⚠️  Догенерация не удалась: {_ge}")
-                            logging.debug(traceback.format_exc())
-            except Exception as _fe:
-                print(f"  [Pre-concat fallback] пропущен: {_fe}")
-                logging.debug(traceback.format_exc())
+                                _us = sorted(_undelivered)
+                                print(f"  [Pre-concat fallback] после t2v осталось "
+                                      f"{len(_us)} — добираю картинкой")
+                # Картиночная догенерация: либо режим не t2v, либо t2v закрыл
+                # не всё. Пустой список означает, что добирать уже нечего.
+                if _undelivered:
+                    _us = sorted(_undelivered)
+                    print(f"\n  [Pre-concat fallback] {len(_us)} клипов без медиа → догенерация картинкой "
+                          f"(без анимации, генератор={_fb_src}): "
+                          f"{_us[:10]}{'...' if len(_us) > 10 else ''}")
+                    try:
+                        if _fb_src == 'cinai' and getattr(config, 'CINAI_ACCESS_TOKEN', ''):
+                            _fb_result = cinai_generate_all_images(
+                                project_dir=p_dir,
+                                clip_ids=_undelivered,
+                                max_parallel=getattr(config, 'CINAI_MAX_PARALLEL', 6),
+                                model=config.CINAI_MODEL,
+                                aspect_ratio=getattr(config, 'CINAI_ASPECT_RATIO', '16:9'),
+                                quality=getattr(config, 'CINAI_QUALITY', '1K'),
+                                silent=True,
+                            )
+                            print(f"  [Pre-concat fallback] CinAI: "
+                                  f"ok={_fb_result.get('generated', 0)} "
+                                  f"failed={_fb_result.get('failed', 0)}")
+                        elif _fb_src == 'fastgen' and getattr(config, 'FASTGEN_API_KEY', ''):
+                            from units.fastgen_engine import generate_all_images as _fg_gen
+                            _fb_api, _fb_dual, _fb_slot = _resolve_fastgen_slot(
+                                imggen_key_slot, allow_dual=True)
+                            _fb_result = _fg_gen(
+                                project_dir=p_dir,
+                                clip_ids=_undelivered,
+                                api_key=_fb_api,
+                                dual_key=_fb_dual,
+                                silent=True,
+                                preflight=False,
+                            )
+                            print(f"  [Pre-concat fallback] FastGen slot={_fb_slot}: "
+                                  f"ok={_fb_result.get('generated', 0)} "
+                                  f"failed={_fb_result.get('failed', 0)}")
+                        else:
+                            # veononstop (или неизвестный источник → безопасный дефолт)
+                            from units.veo_stills import generate_all_images as _fb_imggen
+                            _fb_mode = (getattr(config, 'VEONONSTOP_IMGGEN_MODE', 'imagen') or 'imagen').strip()
+                            # banana_ref/banana2_ref грузят style-reference из project/ref/.
+                            # Для догенерации одиночных клипов рефов может не быть → imggen
+                            # кинет ошибку. Проверяем и откатываемся на imagen.
+                            if _fb_mode in ('banana_ref', 'banana2_ref'):
+                                _ref_dir = Path(project_dir) / 'ref'
+                                _has_refs = _ref_dir.is_dir() and any(
+                                    p.suffix.lower() in ('.jpg', '.jpeg', '.png', '.webp')
+                                    for p in _ref_dir.iterdir() if p.is_file()
+                                )
+                                if not _has_refs:
+                                    print(f"  [Pre-concat fallback] режим {_fb_mode}, но в project/ref/ нет "
+                                          f"рефов → откат на imagen")
+                                    _fb_mode = 'imagen'
+                            _fb_imggen(project_dir=p_dir, mode=_fb_mode, clip_ids=_undelivered,
+                                       silent=True, preflight=False)
+                    except Exception as _ge:
+                        print(f"  [Pre-concat fallback] ⚠️  Догенерация не удалась: {_ge}")
+                        logging.debug(traceback.format_exc())
+        except Exception as _fe:
+            print(f"  [Pre-concat fallback] пропущен: {_fe}")
+            logging.debug(traceback.format_exc())
 
     # ── Параллакс готовым фото (сток / архивы), стандартный режим ───────────
     # Нейрокадры получают параллакс внутри обычного i2v, а сток и архивные фото

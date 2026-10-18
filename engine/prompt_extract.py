@@ -122,16 +122,8 @@ def remap_dense_prompts_for_montage(prompts: dict, clips: list) -> tuple:
     if not prompts or not clips:
         return prompts, False
 
-    # Точка правды — units/source_ledger.py. Но этот файл queue.py копирует в папку
-    # проекта, и process_*.bat запускает его ОТТУДА (`python prompt_extract.py`), где
-    # modules/ рядом нет — поэтому импорт с fallback, иначе копии в проектах падают.
-    try:
-        from units.source_ledger import EXTERNAL_SOURCES as real_sources
-    except ImportError:
-        real_sources = frozenset({
-            'real_photo', 'real_photo_pending', 'real_video',
-            'stock_pending', 'stock_photo', 'stock_video',
-        })
+    # Точка правды — units/source_ledger.py.
+    from units.source_ledger import EXTERNAL_SOURCES as real_sources
     non_real_clips = [c for c in clips if c.get('source') not in real_sources]
     real_count = len(clips) - len(non_real_clips)
     if real_count <= 0:

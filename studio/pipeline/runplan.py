@@ -62,11 +62,6 @@ def subtitles_template(v: dict) -> str:
 def stage_env(v: dict) -> dict:
     """Настройки стадий (сток / инфографика) -> env."""
     m: dict = {}
-    # Возможностей «Реальные фото», карточек персон/мест и атрибуции в программе нет.
-    # Выключаем их явно, чтобы старые значения из engine/.env не включили их обратно.
-    m["REAL_PHOTO_ENABLED"] = "false"
-    m["REAL_PHOTO_EPF_BRIDGE"] = "0"
-    m["ATTRIBUTION_OVERLAY"] = "false"
     m["BEGO_LIVE_ANIMATE"] = "1" if v.get("video_live_animate") else "0"
     m["VIDEO_LIVE_ANIMATE"] = m["BEGO_LIVE_ANIMATE"]
     # доли источников — из блока «Состав видео» (проценты от всех клипов)
@@ -131,7 +126,6 @@ def stage_env(v: dict) -> dict:
     # функции, которых нет в BegoFrame, явно выключены
     # Референсов нет: движок не копирует их в проект (даже из inbox/ref/) и не берёт из ref/ проекта
     m["BEGO_REFS_DISABLED"] = "1"
-    m["STYLE_EXTRACT_MODE"] = "off"
     m.update(cinai_video_env(v))
     return m
 
@@ -229,7 +223,6 @@ def defaults_env(v: dict) -> dict:
         "VEONONSTOP_I2V_PARALLAX_EVERY_N": str(max(1, int(v["i2v_parallax_every_n"]))),
         "VEONONSTOP_I2V_PARALLAX_AI": _on(v["i2v_parallax_ai"]),
         "VEONONSTOP_I2V_PARALLAX_STOCK": _on(v["i2v_parallax_stock"]),
-        "VEONONSTOP_I2V_PARALLAX_REAL_PHOTO": "off",
         "CINAI_MODEL": v["cinai_model"],
         "CINAI_ASPECT_RATIO": v["veo_ratio"],
         "CINAI_QUALITY": v["cinai_quality"],
@@ -468,7 +461,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         "VEONONSTOP_I2V_PARALLAX_EVERY_N": str(max(1, int(v["i2v_parallax_every_n"]))),
         "VEONONSTOP_I2V_PARALLAX_AI": _on(v["i2v_parallax_ai"]),
         "VEONONSTOP_I2V_PARALLAX_STOCK": _on(v["i2v_parallax_stock"]),
-        "VEONONSTOP_I2V_PARALLAX_REAL_PHOTO": "off",
         "CINAI_MODEL": v["cinai_model"],
         "CINAI_ASPECT_RATIO": v["veo_ratio"],
         "CINAI_QUALITY": v["cinai_quality"],

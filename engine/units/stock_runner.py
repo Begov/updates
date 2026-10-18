@@ -11,7 +11,7 @@ stock_stage.py — стадия подстановки сток-материал
 см. units/source_ledger.py (EXTERNAL_SOURCES).
 
 Поиск: спрашиваем ВСЕ включённые стоки сразу и сводим кандидатов на ОДИН лист
-для вижна — как архивы с `REAL_PHOTO_SOURCE_MIX`. Выбор идёт по качеству кадра,
+для вижна. Выбор идёт по качеству кадра,
 а не по тому, кто ответил первым. Индексы у стоков разные: чего нет в Pexels,
 часто есть в Pixabay, и наоборот — «нашлось» ещё не значит «нашлось лучшее».
 
@@ -237,8 +237,8 @@ def _search_cascade(
         limit = int(getattr(config, 'STOCK_SEARCH_LIMIT', 80) or 80)
     order = [primary] + [s for s in sources if s != primary]
 
-    # Спрашиваем ВСЕ стоки и сводим кандидатов на один лист — так же, как архивы
-    # с `REAL_PHOTO_SOURCE_MIX`. Раньше здесь стоял `return` на первом источнике,
+    # Спрашиваем ВСЕ стоки и сводим кандидатов на один лист. Раньше здесь стоял
+    # `return` на первом источнике,
     # который что-то нашёл: до второго дело не доходило, и вижн выбирал лучший
     # кадр только среди того, что принёс сработавший сток, даже когда в соседнем
     # лежал кадр точнее (улов 26.08). Индексы у стоков разные, и «нашлось» ещё не
@@ -418,7 +418,7 @@ class StockProcessor:
         Директор кладёт в montage_plan только id/тайминги/source — текста там
         НЕТ. Без него промптер стока сочинял запросы вслепую («factory
         workers», «mountain landscape» в ролике про Леонардо), и в ролик
-        попадал случайный футаж. Real Photo давно берёт текст отсюда же.
+        попадал случайный футаж.
         """
         fragments = self._transcript_fragments()
         if not fragments:
@@ -1205,93 +1205,8 @@ class StockProcessor:
             logger.warning("[stock] credits .md write failed (non-fatal): %s", exc)
 
 
-def _epf_fallback_enabled() -> bool:
-    """Есть ли кому подхватить сцену после стока.
-
-    Мост EPF или архивная стадия. Если пользователь ими не пользуется вовсе —
-    ничего не навязываем: сцена идёт дальше по каскаду, в нейрогенерацию.
-    """
-    return bool(getattr(config, 'REAL_PHOTO_EPF_BRIDGE', False)
-                or getattr(config, 'REAL_PHOTO_ENABLED', False))
 
 
-def _run_epf_fallback(project_dir: Path, clips: List[Dict[str, Any]],
-                      queries: Dict[int, Any], *, target_w: int, target_h: int,
-                      fps: int, stop_event=None) -> set:
-    """Сцены, которые сток не закрыл, → архивы и EPF ТОЧЕЧНО (каскад 2.7, ступень 3).
-
-    Делается ровно так же, как у ютуб-стадии (`youtube_stage._run_epf_fallback`):
-    свой `RealPhotoProcessor`, временно включённый мост EPF и `process_phase`
-    на список сцен. Именно `process_phase`, а не голый `process_clip`: он же
-    пишет клипу финальный маркер `real_photo` с `real_meta` и кредиты — иначе
-    закрытая сцена осталась бы в плане незакрытой.
-
-    Через маркер `real_photo_pending` передавать нельзя: архивная стадия к этому
-    времени работает по списку, снятому при её старте, и новую сцену не увидит.
-
-    Возвращает множество clip_id, которые получили кадр.
-    """
-    if not clips:
-        return set()
-    from units.archive_photos import ClipSelection, RealPhotoProcessor
-    from units.stock_queries import guess_subject
-
-    selections = []
-    for clip in clips:
-        clip_id = int(clip.get('id') or 0)
-        stock_query = queries.get(clip_id)
-        query = str(getattr(stock_query, 'query', '') or '').strip()
-        if not query:
-            query = str(clip.get('description') or clip.get('visual_intent') or '').strip()
-        if not query:
-            continue
-        selections.append(ClipSelection(
-            clip_id=clip_id,
-            search_query=query,
-            search_query_local='',
-            preferred_type='photo',
-            preferred_sources=list(getattr(
-                config, 'REAL_PHOTO_SOURCES', ['wikimedia', 'nasa', 'loc', 'archive'])),
-            reasoning='сток не закрыл сцену; каскад → архивы/EPF',
-            confidence='medium',
-            query_provider='stock_fallback',
-            query_path='fallback',
-            context_text=_scene_brief(clip),
-        ))
-    if not selections:
-        return set()
-
-    print(f"[stock] {len(selections)} клип(ов) не закрыты стоком → архивы/EPF "
-          f"(каскад): {sorted(s.clip_id for s in selections)[:12]}")
-    processor = RealPhotoProcessor(
-        project_dir=Path(project_dir),
-        target_ratio=1.0, min_ratio=1.0, max_ratio=1.0,
-        sources=list(getattr(config, 'REAL_PHOTO_SOURCES',
-                             ['wikimedia', 'nasa', 'loc', 'archive'])),
-        target_w=target_w, target_h=target_h, fps=fps,
-    )
-    old_bridge = getattr(config, 'REAL_PHOTO_EPF_BRIDGE', False)
-    config.REAL_PHOTO_EPF_BRIDGE = True
-    timeout = max(30, int(getattr(config, 'REAL_PHOTO_EPF_SEARCH_TIMEOUT', 180) or 180))
-    try:
-        processor.process_phase(
-            selections,
-            stop_event=stop_event,
-            deadline_ts=time.time() + timeout * max(1, len(selections)),
-        )
-    except Exception as exc:                               # noqa: BLE001
-        logger.warning("[stock] архивы/EPF не отработали (%s) — клипы уйдут дальше по каскаду", exc)
-        return set()
-    finally:
-        config.REAL_PHOTO_EPF_BRIDGE = old_bridge
-
-    closed = set()
-    project = Path(project_dir)
-    for selection in selections:
-        if any((project / 'generated').glob(f'{selection.clip_id:03d}.*')):
-            closed.add(selection.clip_id)
-    print(f"[stock] архивы/EPF закрыли {len(closed)} из {len(selections)}")
-    return closed
 
 
 def run_stock_stage(
@@ -1342,7 +1257,7 @@ def run_stock_stage(
 
     # Интро-гейт: сток не ставим раньше STOCK_START_SEC — вступление ролика
     # должно быть своей динамикой, а не стоковой нарезкой. Своя граница у
-    # каждой стадии (у Real Photo и инфографики — собственные).
+    # каждой стадии (у инфографики — собственная).
     _gate_sec = float(getattr(config, 'STOCK_START_SEC', 0) or 0)
     if _gate_sec > 0:
         from units.source_ledger import STOCK_SOURCES, apply_intro_gate
@@ -1455,41 +1370,9 @@ def run_stock_stage(
                                 thread_name_prefix='stock') as pool:
             list(pool.map(lambda pair: _handle_one(*pair), list(enumerate(pending))))
 
-    # Каскад 2.7, ступень 3: сцены, которые сток не закрыл, пробуем архивами и
-    # EPF ТОЧЕЧНО — до того, как снимем маркер и отдадим их нейрогенерации.
-    # Клипы, закрытые здесь, из дельты стока исключаются: `process_phase` уже
-    # поставил им финальный маркер `real_photo`, и наша запись затёрла бы его.
-    _epf_closed: set = set()
-    _stopped = bool(stop_event is not None and stop_event.is_set())
-    _deadline_hit = bool(deadline_ts and time.time() > deadline_ts)
-    if not _stopped and not _deadline_hit and _epf_fallback_enabled():
-        _unresolved = [c for c in pending
-                       if c.get('source') == 'stock_pending'
-                       and not proc._clip_asset_ready(c)]
-        if _unresolved:
-            try:
-                _epf_closed = _run_epf_fallback(
-                    proc.project_dir, _unresolved, proc.queries,
-                    target_w=target_w, target_h=target_h,
-                    fps=proc.fps, stop_event=stop_event)
-            except Exception as exc:                       # noqa: BLE001
-                logger.warning("[stock] каскад в архивы не запустился: %s", exc)
-            for clip in _unresolved:
-                if int(clip.get('id') or 0) in _epf_closed:
-                    cid = int(clip.get('id') or 0)
-                    if cid in fallback_ids:
-                        fallback_ids.remove(cid)
-                        reasons.pop(cid, None)
-
-    # Не нашлось / прервано / дедлайн. В обычном режиме снимаем маркер, и клип
-    # подхватит генератор (или Pre-concat fallback). В режиме «только не-AI»
-    # генерации НЕТ, и снятый маркер оставлял сцену сиротой — без источника и
-    # без файла: она доживала до склейки пустой (улов прогона 26.08, клип 9).
-    # Там сцену передаём архивам — это единственный путь, который в этом режиме
-    # реально работает.
-    _left = [c for c in pending
-             if c.get('source') == 'stock_pending'
-             and int(c.get('id') or 0) not in _epf_closed]
+    # Не нашлось / прервано / дедлайн: снимаем маркер, и клип подхватит
+    # генератор (или Pre-concat fallback).
+    _left = [c for c in pending if c.get('source') == 'stock_pending']
     if _left:
         _release_pending(_left, why='клипы не закрыты стоком')
         for clip in _left:
@@ -1498,13 +1381,9 @@ def run_stock_stage(
                 fallback_ids.append(cid)
                 reasons.setdefault(cid, 'не дошла очередь (стоп/дедлайн)')
 
-    # ТОЛЬКО свои клипы по дельте (не весь план) — real_photo пишет параллельно,
-    # полный снимок затёр бы его правки (см. apply_clip_source_delta).
-    # Сцены, закрытые архивами по каскаду, в дельту НЕ идут: у них уже стоит
-    # финальный маркер `real_photo` от `process_phase`, и наша запись
-    # («source: stock_pending» → снят) вернула бы их в никуда.
-    proc._commit_pending_delta([c for c in pending
-                                if int(c.get('id') or 0) not in _epf_closed])
+    # ТОЛЬКО свои клипы по дельте (не весь план) — другие стадии пишут параллельно,
+    # полный снимок затёр бы их правки (см. apply_clip_source_delta).
+    proc._commit_pending_delta(pending)
     proc.write_credits()
     _write_stock_report(proc.project_dir, ok, fallback_ids, reasons, sources)
 

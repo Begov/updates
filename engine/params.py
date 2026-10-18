@@ -337,8 +337,6 @@ STOCK_PIPELINE_WAIT_TIMEOUT = max(0, int(os.getenv('STOCK_PIPELINE_WAIT_TIMEOUT'
 
 # Сток: сколько секунд ТИШИНЫ (ни одной новой закрытой сцены) ждать перед остановкой. Заменяет глухой отсчёт: пока стадия работает, ждём.
 STOCK_IDLE_TIMEOUT = max(60, int(os.getenv('STOCK_IDLE_TIMEOUT', '300') or '300'))
-# Real Photo: то же самое. Заменяет глухой отсчёт: пока стадия работает, ждём.
-REAL_PHOTO_IDLE_TIMEOUT = max(60, int(os.getenv('REAL_PHOTO_IDLE_TIMEOUT', '300') or '300'))
 # Отказ стока (429, авария 5xx, обрыв связи) — не «ничего не нашлось»: ждём и
 # повторяем уже другим ключом. Пауза удваивается с каждой попыткой, а
 # присланный стоком Retry-After имеет приоритет.
@@ -352,8 +350,7 @@ STOCK_CLIP_START_SEC = float(os.getenv('STOCK_CLIP_START_SEC', '0') or '0')
 # С какой секунды РОЛИКА режиссёру можно ставить сток-маркер. Вступление —
 # хук, там нужна своя динамика, а не стоковая нарезка. Клипы раньше порога
 # теряют маркер и уходят в обычную генерацию. 0 = без ограничения.
-# У каждой стадии своя граница: REAL_PHOTO_START_SEC / STOCK_START_SEC /
-# INFOGRAPHIC_START_SEC — они независимы.
+# У каждой стадии своя граница: STOCK_START_SEC / INFOGRAPHIC_START_SEC — они независимы.
 STOCK_START_SEC = float(os.getenv('STOCK_START_SEC', '0') or '0')
 STOCK_CLIP_START_JITTER = os.getenv('STOCK_CLIP_START_JITTER', 'false').lower() in ('true', '1', 'yes', 'on')
 STOCK_CLIP_START_JITTER_SEC = float(os.getenv('STOCK_CLIP_START_JITTER_SEC', '2') or '2')
@@ -424,12 +421,6 @@ PIXABAY_API_KEY_2 = os.getenv('PIXABAY_API_KEY_2', '').strip()
 PIXABAY_API_KEY_3 = os.getenv('PIXABAY_API_KEY_3', '').strip()
 
 
-# Плашка источника на кадре («Wikimedia», «Google Images») для архивных кадров.
-# ВЫКЛЮЧЕНА по умолчанию: надпись в углу портит продакшн-качество ролика
-# (решение пользователя 26.08). Атрибуция при этом не теряется — остаётся в
-# real_photos_credits.json и в real_meta плана, откуда её берут в описание.
-ATTRIBUTION_OVERLAY = os.getenv('ATTRIBUTION_OVERLAY', 'false').lower() in ('true', '1', 'yes', 'on')
-
 # Какая доля слов поискового запроса должна совпасть с тегами стокового кандидата,
 # чтобы он дошёл до вижна. 0.5 = половина — то же, что у локальной библиотеки.
 # Ниже порог → в кандидаты лезет случайный материал по одному общему слову
@@ -443,12 +434,8 @@ STOCK_MATCH_MIN_SHARE = float(os.getenv('STOCK_MATCH_MIN_SHARE', '0.5') or 0.5)
 # Pexels 80, Pixabay 200 — они клампят сами.
 STOCK_SEARCH_LIMIT = max(3, int(os.getenv('STOCK_SEARCH_LIMIT', '80') or 80))
 
-# Сколько экземпляров EPF работает одновременно. У EPF есть штатная настройка
-# «Multiply program instances» — мост снимает запрет сам, а каждой дорожке даёт
-# свою папку данных (общая база = драка за файлы). 1 = как раньше, по одному.
-REAL_PHOTO_EPF_LANES = max(1, min(8, int(os.getenv('REAL_PHOTO_EPF_LANES', '4') or 4)))
 
-# Сколько вызовов Codex CLI идут одновременно. Дорожки EPF, промптеры стадий,
+# Сколько вызовов Codex CLI идут одновременно. Промптеры стадий,
 # вижн и адаптеры дёргают его независимо; без лимита набегает больше десятка и
 # вызовы душат друг друга таймаутами (прогон 26.08: промптер стока получил
 # «timed out after 180s», а в одиночку тот же запрос отвечает за 21с).
@@ -558,19 +545,6 @@ PASS2_EXTERNALIZE_REFMATCH = (os.getenv('PASS2_EXTERNALIZE_REFMATCH', '') or '1'
 # Pass 2 оптимизация: выносить STYLE-блок из вывода модели (дописывать скриптом, как negative).
 # Срезает ещё ~120 слов × N клипов. 1=вкл (дефолт), 0=выкл.
 PASS2_EXTERNALIZE_STYLE = (os.getenv('PASS2_EXTERNALIZE_STYLE', '') or '1').strip() not in ('0', 'false', 'no', '')
-# КАК выделять style/negative блоки из стайлгайда:
-#   neuro  — семантически нейрой (style_extractor, любой SG, +1 дешёвый вызов) — ДЕФОЛТ
-#   regex  — питон по якорям ("...VERBATIM..." + code) — 0 токенов, нужна конвенция в SG
-#   off    — не выносить (модель пишет стиль/негатив сама, как раньше)
-STYLE_EXTRACT_MODE = (os.getenv('STYLE_EXTRACT_MODE', '') or 'neuro').strip().lower()
-# Backend для нейро-выделения блоков: direct chat provider|claude_api|codex.
-# Пусто = оператор режиссёра, иначе Codex.
-STYLE_EXTRACT_BACKEND = os.getenv('STYLE_EXTRACT_BACKEND', '').strip().lower()
-# Конкретная модель (slug) для нейро-выделения. Пусто = провайдерский дефолт.
-STYLE_EXTRACT_MODEL = _model('STYLE_EXTRACT_MODEL', '')
-if STYLE_EXTRACT_BACKEND == 'claude_api':
-    STYLE_EXTRACT_MODEL = _normalize_claude_nexus_model(
-        STYLE_EXTRACT_MODEL)
 
 
 def reasoning_params_for_provider(provider: str, level: str = None) -> dict:
@@ -1167,9 +1141,6 @@ VEONONSTOP_I2V_PARALLAX_AI = (
 VEONONSTOP_I2V_PARALLAX_STOCK = (
     os.getenv('VEONONSTOP_I2V_PARALLAX_STOCK', 'false') or 'false'
 ).strip().lower() in ('on', 'true', '1', 'yes')
-VEONONSTOP_I2V_PARALLAX_REAL_PHOTO = (
-    os.getenv('VEONONSTOP_I2V_PARALLAX_REAL_PHOTO', 'false') or 'false'
-).strip().lower() in ('on', 'true', '1', 'yes')
 # Сколько ждать параллакс, когда все стадии закончили. Кадры, закрытые в самом
 # конце прогона, только-только легли в generated/ — резкий стоп не дал бы их
 # оживить. Не дождались за это время — стопаем и уходим в склейку, такие кадры
@@ -1397,155 +1368,10 @@ PIPELINE_KEEP_VEO_SOUND = (os.getenv('PIPELINE_KEEP_VEO_SOUND', '') or 'false').
 # inline-путь (склейка блокирует очередь генерации до завершения).
 CONCAT_QUEUE_ENABLED  = (os.getenv('CONCAT_QUEUE_ENABLED', '') or 'true').lower() in ('true', '1', 'yes')
 
-# ============================================================================
-# REAL PHOTO STAGE (archival photo/video insertion)
-# ============================================================================
-# Replace AI-generated imagery with real archival material from PD/CC sources
-# (Wikimedia / NASA / Library of Congress / Internet Archive) for selected clips.
-# Stage runs between Director and ImgGen. Produces vid_img/{id}.mp4 directly,
-# so ImgGen and Veo i2v skip these clips automatically.
-
-REAL_PHOTO_ENABLED       = os.getenv('REAL_PHOTO_ENABLED',       'false').lower() in ('true', '1', 'yes')
-REAL_PHOTO_RATIO_TARGET  = float(os.getenv('REAL_PHOTO_RATIO_TARGET', '0.40'))   # target % of clips to replace
-REAL_PHOTO_RATIO_MIN     = float(os.getenv('REAL_PHOTO_RATIO_MIN',    '0.30'))   # hard floor
-REAL_PHOTO_RATIO_MAX     = float(os.getenv('REAL_PHOTO_RATIO_MAX',    '0.55'))   # hard ceiling
-# Optional automatic EPF sidecar: Real Photo supplies its selected clip queries
-# to Extreme Picture Finder. EPF downloads candidates, then a vision model
-# chooses one image per clip before the bridge imports it into generated/.
-REAL_PHOTO_EPF_BRIDGE = os.getenv('REAL_PHOTO_EPF_BRIDGE', '0').lower() in ('true', '1', 'yes')
-REAL_PHOTO_EPF_VISIBLE = os.getenv('REAL_PHOTO_EPF_VISIBLE', '0').lower() in ('true', '1', 'yes')
-REAL_PHOTO_EPF_EXE = os.getenv('REAL_PHOTO_EPF_EXE', '').strip()
-REAL_PHOTO_EPF_DATA_DIR = os.getenv('REAL_PHOTO_EPF_DATA_DIR', '').strip()
-REAL_PHOTO_EPF_ENGINES = os.getenv('REAL_PHOTO_EPF_ENGINES', 'google,bing').strip()
-REAL_PHOTO_EPF_CANDIDATES = max(1, int(os.getenv('REAL_PHOTO_EPF_CANDIDATES', '12') or '12'))
-# Вижн-отбор АРХИВНОГО пути (Wikimedia/NASA/LoC/…; 25.08): сколько кандидатов
-# из выдачи источника скачать и показать вижну одним контактным листом.
-# 0 = как раньше — первый скачавшийся кандидат без просмотра кадра.
-REAL_PHOTO_VISION_CANDIDATES = max(0, int(os.getenv('REAL_PHOTO_VISION_CANDIDATES', '4') or 4))
-REAL_PHOTO_EPF_SEARCH_TIMEOUT = max(
-    30, int(os.getenv('REAL_PHOTO_EPF_SEARCH_TIMEOUT', '180') or '180')
-)
-REAL_PHOTO_VISION_PROVIDER = (
-    os.getenv('REAL_PHOTO_VISION_PROVIDER', 'codex') or 'codex'
-).strip().lower()
-REAL_PHOTO_VISION_MODEL = _model('REAL_PHOTO_VISION_MODEL', '')
-if REAL_PHOTO_VISION_PROVIDER == 'claude_api':
-    REAL_PHOTO_VISION_MODEL = _normalize_claude_nexus_model(
-        REAL_PHOTO_VISION_MODEL)
-# Архив-фото легитимны только с этой секунды ролика. Клипы раньше неё (вступительный хук —
-# динамичные атмосферные кадры) режиссёр часто ошибочно метит под архив, потому что интро
-# насыщено топонимами. Гейт снимает маркер с таких клипов → они идут в обычную генерацию.
-# 0 = выключено (метить с самого начала). Дефолт 15 ≈ зона «динамичного вступления» Pass1.
-REAL_PHOTO_START_SEC     = float(os.getenv('REAL_PHOTO_START_SEC',    '15'))
-# Глубина выдачи АРХИВНЫХ источников (wikimedia/nasa/loc/met/getty/europeana/smithsonian/archive):
-# сколько записей/статей копнуть в каждом, прежде чем перейти к следующему источнику каскада.
-# Для wikimedia это число вики-СТАТЕЙ (берём pageimage каждой, дедуп по странице → «иная статья»).
-# Yandex — веб-хранилище картинок, глубину «статей» к нему не применяем (берёт топ релевантных).
-REAL_PHOTO_SEARCH_DEPTH  = max(1, int(os.getenv('REAL_PHOTO_SEARCH_DEPTH', '6') or '6'))
-
-# Comma-separated source list; order = priority.
-# Allowed: wikimedia, nasa, loc, met, getty, europeana, smithsonian, rijksmuseum, archive
-# - wikimedia, nasa, loc, met, getty — no API key needed
-# - europeana                        — free key from https://pro.europeana.eu/page/get-api
-# - smithsonian                      — free key from https://api.data.gov/signup/
-# - rijksmuseum                      — FROZEN (legacy API requires key, new API needs Linked Art rewrite)
-# - archive                          — Internet Archive (archive.org), no key needed
-# - openverse                        — Openverse (CC-фото Flickr/Commons/музеи), без ключа 200 запросов/день;
-#                                      с OPENVERSE_CLIENT_ID/SECRET — больше (см. api.openverse.org)
-# - serper                           — Google Images через serper.dev (ключ SERPER_API_KEY, 1 кредит/запрос);
-#                                      веб-картинки без лицензионных метаданных — как yandex
-# - epf                             — Extreme Picture Finder (локальный поисковик картинок).
-#                                      С 25.08 он такой же источник каскада: его позиция в
-#                                      списке = приоритет. Работает, только если включён
-#                                      REAL_PHOTO_EPF_BRIDGE (галка ставит и то, и другое).
-_real_photo_sources_raw  = os.getenv('REAL_PHOTO_SOURCES', 'wikimedia,yandex,nasa,loc,met,getty,europeana,smithsonian,archive')
-REAL_PHOTO_SOURCES       = [s.strip() for s in _real_photo_sources_raw.split(',') if s.strip()]
-# Совместимость со старыми .env: раньше EPF шёл ОТДЕЛЬНЫМ проходом впереди всех и в
-# списке источников его не было. Если мост включён, а в списке epf нет — ставим первым,
-# чтобы обновление не поменяло приоритет молча.
-if REAL_PHOTO_EPF_BRIDGE and 'epf' not in REAL_PHOTO_SOURCES:
-    REAL_PHOTO_SOURCES.insert(0, 'epf')
-# Микс источников: кандидаты со ВСЕХ включённых источников идут вижну одним контактным
-# листом (он сравнивает их между собой), вместо каскада «первый подошедший побеждает».
-REAL_PHOTO_SOURCE_MIX    = os.getenv('REAL_PHOTO_SOURCE_MIX', '1').lower() in ('true', '1', 'yes')
-# Вижн стока: свой выбор в GUI; пусто = «как у Real Photo» (REAL_PHOTO_VISION_*).
+# Вижн стока: провайдер и модель задаются в GUI.
 STOCK_VISION_PROVIDER    = os.getenv('STOCK_VISION_PROVIDER', '').strip()
 STOCK_VISION_MODEL       = os.getenv('STOCK_VISION_MODEL', '').strip()
-# Потолок кандидатов на общем листе микса (сливаются по кругу от каждого источника).
-REAL_PHOTO_MIX_MAX_CANDIDATES = max(2, int(os.getenv('REAL_PHOTO_MIX_MAX_CANDIDATES', '16') or 16))
-# «Без стоковых фото»: минус-слова фотостоков в поисковую фразу EPF + отбрасывание
-# скачанного со стоковых доменов (домен берётся из файла состояния EPF). Выключено —
-# полагаемся только на вижн (он видит водяной знак на кадре).
-REAL_PHOTO_NO_STOCK_PHOTOS = os.getenv('REAL_PHOTO_NO_STOCK_PHOTOS', '1').lower() in ('true', '1', 'yes')
-# Товарные карточки маркетплейсов: у них нет водяного знака, поэтому вижн их
-# пропускает — отсекаем по домену ДО выдачи (улов живого прогона 01.09).
-REAL_PHOTO_NO_MARKETPLACES = os.getenv('REAL_PHOTO_NO_MARKETPLACES', '1').lower() in ('true', '1', 'yes')
-# Yandex Картинки: минус-флаги исключения AI/3D-генераций из выдачи (гравюры/карты/схемы НЕ режем)
-REAL_PHOTO_YANDEX_EXCLUDE = os.getenv('REAL_PHOTO_YANDEX_EXCLUDE', '') or '-нейросеть -нейро -ии -ai -midjourney -render -3d -рендер'
 
-# Optional API keys for extra sources (leave blank if not registered)
-EUROPEANA_API_KEY        = os.getenv('EUROPEANA_API_KEY',        '').strip()
-SMITHSONIAN_API_KEY      = os.getenv('SMITHSONIAN_API_KEY',      '').strip()
-RIJKSMUSEUM_API_KEY      = os.getenv('RIJKSMUSEUM_API_KEY',      '').strip()
-SERPER_API_KEY           = os.getenv('SERPER_API_KEY',           '').strip()   # serper.dev — Google Images
-# Bright Data — тот же поиск картинок Google, но через их шлюз. Второй вход
-# нужен потому, что модуль EPF работает только на Windows (это .exe), и на маке
-# архивная ветка оставалась без Google вовсе.
-BRIGHTDATA_API_TOKEN     = os.getenv('BRIGHTDATA_API_TOKEN',     '').strip()
-# Пусто = имя зоны спросим у самой Bright Data по токену (/zone/get_active_zones,
-# берётся зона типа serp). Раньше здесь стояло запасное имя зоны РАЗРАБОТЧИКА —
-# у любого другого человека запрос уходил бы в несуществующую зону и источник
-# молча не отдавал бы ничего.
-BRIGHTDATA_ZONE          = os.getenv('BRIGHTDATA_ZONE',          '').strip()
-OPENVERSE_CLIENT_ID      = os.getenv('OPENVERSE_CLIENT_ID',      '').strip()   # пусто = анонимно (200/день)
-OPENVERSE_CLIENT_SECRET  = os.getenv('OPENVERSE_CLIENT_SECRET',  '').strip()
-
-# Codex model for selection + keyframe pick + fallback queries.
-# Real Photo stage prefers gpt-5.5 (better at structured output and rejecting weak candidates).
-# Override in .env if needed; leave the env var blank to inherit the global GPT_MODEL.
-REAL_PHOTO_CODEX_MODEL   = os.getenv('REAL_PHOTO_CODEX_MODEL',   'gpt-5.5').strip()
-# Оператор промптажа Real Photo (генерация search_query + альтернатив при 0 hits).
-# НЕ зависит от выбранного режиссёра — задаётся отдельно в GUI/env.
-#   codex      — Codex CLI (агент, пишет файлы; падает если CLI не установлен/не авторизован)
-#   deepseek | openrouter | meta_muse — прямой chat API
-# chat-провайдеры надёжнее (inline, без агента и файловой системы).
-REAL_PHOTO_PROMPT_PROVIDER = (os.getenv('REAL_PHOTO_PROMPT_PROVIDER', '') or 'codex').strip().lower()
-# Модель промптера. Пусто → дефолт выбранного провайдера (DEEPSEEK_MODEL / OPENROUTER_MODEL / ...).
-REAL_PHOTO_PROMPT_MODEL    = os.getenv('REAL_PHOTO_PROMPT_MODEL', '').strip()
-if REAL_PHOTO_PROMPT_PROVIDER == 'claude_api':
-    REAL_PHOTO_PROMPT_MODEL = _normalize_claude_nexus_model(
-        REAL_PHOTO_PROMPT_MODEL)
-# Cache lives inside each project at <project>/real_photo_cache/. No global limit needed —
-# caches are bounded by project lifetime and disposed when project is deleted.
-
-# Fallback-страховка: Pass 2 пишет промпты ДЛЯ ВСЕХ клипов (включая real_photo_pending).
-# Если real_photo не нашёл/не скачал/завис — клип догенерится нейросетью по готовому
-# промпту (картинкой, без анимации). 1=вкл (дефолт). 0=старое поведение (Pass2 скип).
-REAL_PHOTO_PROMPT_FALLBACK = (os.getenv('REAL_PHOTO_PROMPT_FALLBACK', '') or '1').strip() not in ('0', 'false', 'no', '')
-# Общий дедлайн фоновой Real Photo стадии с момента старта (сек).
-REAL_PHOTO_WAIT_TIMEOUT = int(os.getenv('REAL_PHOTO_WAIT_TIMEOUT', '1800'))
-# После готовности основной генерации даём Real Photo отдельную фору, не посылая stop.
-# По её истечении остающиеся pending-клипы снимаются и идут в AI fallback.
-REAL_PHOTO_PIPELINE_WAIT_TIMEOUT = int(
-    os.getenv('REAL_PHOTO_PIPELINE_WAIT_TIMEOUT', '100')
-)
-
-# ============================================================================
-# INFOGRAPHIC STAGE (AI stills routed separately from normal image generation)
-# ============================================================================
-NON_AI_IMAGE_MODE = os.getenv('NON_AI_IMAGE_MODE', 'false').lower() in ('true', '1', 'yes', 'on')
-NON_AI_REAL_PHOTO_PERCENT = max(
-    0, min(100, int(float(os.getenv('NON_AI_REAL_PHOTO_PERCENT', '50') or '50')))
-)
-NON_AI_INFOGRAPHIC_PERCENT = max(
-    0, min(100, int(float(os.getenv('NON_AI_INFOGRAPHIC_PERCENT', '25') or '25')))
-)
-NON_AI_STOCK_PERCENT = max(
-    0, min(100, int(float(os.getenv('NON_AI_STOCK_PERCENT', '25') or '25')))
-)
-NON_AI_YOUTUBE_PERCENT = max(
-    0, min(100, int(float(os.getenv('NON_AI_YOUTUBE_PERCENT', '25') or '25')))
-)
 
 INFOGRAPHIC_ENABLED = os.getenv('INFOGRAPHIC_ENABLED', 'false').lower() in ('true', '1', 'yes')
 INFOGRAPHIC_RATIO_TARGET = max(0.0, min(1.0, float(os.getenv('INFOGRAPHIC_RATIO_TARGET', '0.15'))))

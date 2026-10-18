@@ -836,73 +836,10 @@ def _ffmpeg_font_path(p: Path):
     return ascii_path.as_posix().replace(':', '\\:')
 
 
-def _resolve_credit_font():
-    """Находит ttf-шрифт для drawtext-плашки real_photo. Возвращает ffmpeg-escaped путь или None.
-
-    drawtext БЕЗ fontfile падает на Windows (нет fontconfig); с КИРИЛЛИЧЕСКИМ путём — тоже
-    (could not parse fontconfig pat). Поэтому: ищем шрифт надёжно (бандл на неск. уровнях +
-    системный по ОС), а путь прогоняем через _ffmpeg_font_path (ASCII-temp если кириллица).
-    None → вызывающий код пропустит плашку, а не уронит concat.
-    """
-    _base = Path(__file__).resolve().parent
-    for _b in (_base, _base.parent, _base.parent.parent, Path.cwd(),
-               Path.cwd().parent, Path.cwd().parent.parent):
-        for _name in ('BookAntiqua.ttf', 'BookAntiqua_Bold.ttf'):
-            _c = _b / 'fonts' / _name
-            if _c.exists():
-                return _ffmpeg_font_path(_c)
-    # системный fallback по ОС
-    if sys.platform == 'win32':
-        _sys_fonts = [r'C:\Windows\Fonts\arial.ttf', r'C:\Windows\Fonts\segoeui.ttf']
-    else:
-        _sys_fonts = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                      '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf']
-    for _sf in _sys_fonts:
-        if Path(_sf).exists():
-            return _ffmpeg_font_path(Path(_sf))
-    return None
 
 
-def attribution_enabled() -> bool:
-    """Рисовать ли плашку источника на кадре («Wikimedia», «Google Images» и т.п.).
-
-    ПО УМОЛЧАНИЮ ВЫКЛЮЧЕНО (решение пользователя 26.08): надпись в углу кадра
-    портит продакшн-качество ролика. Атрибуция при этом НЕ теряется — она
-    остаётся в `real_photos_credits.json` и в `real_meta` монтажного плана,
-    откуда её берут для описания ролика.
-
-    Включается галкой «Атрибуция» в интерфейсе или `ATTRIBUTION_OVERLAY=1`
-    в `.env`; отдельные лицензии (часть Wikimedia) требуют указания источника —
-    для таких проектов её включают осознанно.
-    """
-    raw = str(os.environ.get('ATTRIBUTION_OVERLAY', '') or '').strip().lower()
-    return raw in ('1', 'true', 'yes', 'on')
 
 
-def _drawtext_real_photo(text):
-    """Build drawtext filter for real_photo credit overlay (top-right corner)."""
-    if not text:
-        return ''
-    if not attribution_enabled():
-        return ''
-    font_path = _resolve_credit_font()
-    if not font_path:
-        # Шрифта нет нигде — пропускаем плашку, иначе drawtext без fontfile уронит concat на Windows.
-        logger.warning("real_photo credit: шрифт не найден (agent/fonts/ + системные) — плашка пропущена")
-        return ''
-    s = text.replace('\\', '\\\\').replace(':', '\\:').replace("'", "\\'")
-    s = s.replace(',', '\\,').replace('[', '\\[').replace(']', '\\]').replace(';', '\\;')
-    parts = [
-        f"fontfile='{font_path}'",
-        f"text='{s}'",
-        'fontsize=22',
-        'fontcolor=white@0.92',
-        'bordercolor=black@0.75',
-        'borderw=2',
-        'x=w-tw-28',
-        'y=28',
-    ]
-    return 'drawtext=' + ':'.join(parts)
 
 
 # ── Dip-to-X переходы между клипами ──────────────────────────────────────────
@@ -1119,24 +1056,16 @@ def _normalize_still_image(input_file, work_dir, job_key=''):
 
 def _image_to_zoom_video(input_file, output_file, target_duration, encoder_type, codec, bitrate,
                          logo_path=None, fps=60, keep_audio=False,
-                         credit_text=None, blur_fill=False, upscale_1080=False, upscale_4k=False,
+                         upscale_1080=False, upscale_4k=False,
                          zoom_style='in-center', fade_in=False, fade_out=False, transition_duration=0.5,
                          static_no_motion=False, target_size=None):
     """
     Конвертирует изображение в видео с медленным зумом (Ken Burns effect).
     Зум: 100% → 110% за target_duration секунд. zoom_style — направление+панорама (см. ZOOM_STYLES).
     fade_in/fade_out — dip-to-X переход на границе клипа (native fade или xfade-стиль, см. TRANSITION_STYLES).
-
-    Real Photo extras (when used by archival stage):
-      blur_fill=True   — фон = blurred copy того же фото (без чёрных рамок)
-      credit_text="…"  — credit overlay в верхнем правом углу
     """
     logger.info(f"Изображение → зум-видео: {input_file} ({target_duration:.2f}с)")
-    is_real_photo = bool(credit_text or blur_fill)
-    if is_real_photo:
-        print(f"   📷 [Real Photo] Ken Burns + blur + credit ({target_duration:.2f}с)")
-    else:
-        print(f"   🖼️  Изображение → зум-видео ({target_duration:.2f}с)")
+    print(f"   🖼️  Изображение → зум-видео ({target_duration:.2f}с)")
 
     output_path = Path(output_file)
     render_input, normalized_path = _normalize_still_image(
@@ -1197,89 +1126,25 @@ def _image_to_zoom_video(input_file, output_file, target_duration, encoder_type,
                             '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000']
         audio_output_args = ['-c:a', 'aac', '-b:a', '192k', '-shortest']
 
-    if blur_fill:
-        # Real Photo path: blurred BG + foreground smooth zoom + optional credit
-        bg_chain = (
-            f'scale={target_w}:{target_h}:force_original_aspect_ratio=increase,'
-            f'crop={target_w}:{target_h},'
-            f'gblur=sigma=30,'
-            f'eq=brightness=-0.18,'
-            f'fps={fps},setsar=1'
-        )
-        # Снимок виден ЦЕЛИКОМ поверх размытого фона, поэтому он не масштабируется
-        # отдельно: сперва собирается НЕПОДВИЖНАЯ композиция (фон + фото), а зум
-        # применяется к готовому кадру целиком — тем же `_build_smooth_zoom_chain`,
-        # что и в основной ветке.
-        #
-        # Почему именно так (разбор 26–27.08, четыре неудачных подхода):
-        #   • зума не было вовсе — комментарий обещал «foreground smooth zoom», но
-        #     в цепочке стоял обычный `scale`. 12 архивных кадров и 3 карточки
-        #     инфографики стояли в ролике неподвижно;
-        #   • рост снимка внутри кадра — фото дрожало: `overlay` центрирует по
-        #     ширине потока, а та менялась покадрово;
-        #   • рост внутри фиксированной рамки — фото не закрывало рамку, сверху и
-        #     снизу оставались полосы фона;
-        #   • масштабирование рамки — стороны 608 и 1080 квантуются каждая по
-        #     своему, пропорции гуляли, движение читалось как рывки.
-        # Композиция снимает все четыре: масштабируется одно изображение размером
-        # в полный кадр, ровно как у стоковых, где к зуму претензий нет.
-        fg_chain = (
-            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,setsar=1"
-        )
-        bg_chain = bg_chain.replace(f'fps={fps},', '')   # fps ставится после зума
-        overlay_filter = 'overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1'
-        # Клеим по РЕЗУЛЬТАТУ, а не по наличию credit_text: плашка может быть
-        # выключена настройкой «Атрибуция» (или пропущена из-за отсутствия
-        # шрифта), и тогда `_drawtext_real_photo` отдаёт пустую строку. Старое
-        # условие добавляло запятую до проверки — в граф уходил пустой фильтр,
-        # ffmpeg падал с «No such filter: ''», и КАЖДЫЙ архивный кадр терялся
-        # (прогон 26.08: клипы 8 и 15 заменены соседним кадром).
-        _credit_filter = _drawtext_real_photo(credit_text) if credit_text else ''
-        if _credit_filter:
-            overlay_filter = overlay_filter + ',' + _credit_filter
-        # Готовый кадр зумим целиком. Амплитуда своя: архивный снимок уже
-        # вписан в кадр, и наезд в 10% съедал бы заметную часть композиции —
-        # на живой проверке 27.08 подошли 5%.
-        _archive_amount = max(0.0, float(os.getenv('ZOOM_AMOUNT_ARCHIVE', '0.05') or 0.05))
-        if static_no_motion:
-            _archive_amount = 0.0
-        _archive_zoom = _build_smooth_zoom_chain(
-            zoom_style, target_w, target_h, target_duration,
-            _archive_amount, zoom_curve, zoom_flags, supersample=zoom_supersample)
-        _fparts = [
-            f'[0:v]split=2[bg_in][fg_in]',
-            f'[bg_in]{bg_chain}[bg]',
-            f'[fg_in]{fg_chain}[fg]',
-            f'[bg][fg]{overlay_filter}[composed]',
-            f'[composed]{_archive_zoom},fps={fps}[zoomed]',
-        ]
+    zoom_filter = (
+        f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
+        f"crop={target_w}:{target_h},"
+        f"{smooth_zoom_chain},"
+        f"fps={fps}"
+    )
+
+    if logo_path:
+        # Лого накладывается AS-IS (в исходных размерах PNG). Юзер сам решает
+        # какого размера ему нужно — 150×150 / 350×500 — ffmpeg не трогает.
+        _fparts = [f"[0:v]{zoom_filter}[v]", f"[v][1:v]overlay=W-w-4:H-h-4[zoomed]"]
+        input_args = ['-loop', '1', '-i', render_input, '-i', str(logo_path)] + audio_input_args
+        _audio_idx = 2
+        _next_idx = 3 if keep_audio else 2
+    else:
+        _fparts = [f"[0:v]{zoom_filter}[zoomed]"]
         input_args = ['-loop', '1', '-i', render_input] + audio_input_args
         _audio_idx = 1
         _next_idx = 2 if keep_audio else 1
-    else:
-        zoom_filter = (
-            f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-            f"crop={target_w}:{target_h},"
-            f"{smooth_zoom_chain},"
-            f"fps={fps}"
-        )
-        # См. выше: клеим только непустой фильтр, иначе граф ломается запятой.
-        _credit_filter = _drawtext_real_photo(credit_text) if credit_text else ''
-        if _credit_filter:
-            zoom_filter = zoom_filter + ',' + _credit_filter
-
-        if logo_path:
-            # Лого накладывается AS-IS (в исходных размерах PNG). Юзер сам решает
-            # какого размера ему нужно — 150×150 / 350×500 — ffmpeg не трогает.
-            _fparts = [f"[0:v]{zoom_filter}[v]", f"[v][1:v]overlay=W-w-4:H-h-4[zoomed]"]
-            input_args = ['-loop', '1', '-i', render_input, '-i', str(logo_path)] + audio_input_args
-            _audio_idx = 2
-            _next_idx = 3 if keep_audio else 2
-        else:
-            _fparts = [f"[0:v]{zoom_filter}[zoomed]"]
-            input_args = ['-loop', '1', '-i', render_input] + audio_input_args
-            _audio_idx = 1
-            _next_idx = 2 if keep_audio else 1
 
     # Dip-to-X переходы: клип сохраняет полную target_duration — native fade или xfade против
     # синтетического цветного клипа (wipe/slide/dissolve/...), время НЕ съедается. Без fade — no-op.
@@ -1372,14 +1237,13 @@ def _afade_filter_suffix(fade_in: bool, fade_out: bool, target_duration: float,
 
 def process_video(input_file, output_file, target_duration, encoder_type, codec, bitrate,
                    logo_path=None, blur_borders=False, keep_audio=False, upscale_1080=False, fps=60,
-                   is_chain_extend=False, real_photo_meta=None, upscale_4k=False,
+                   is_chain_extend=False, upscale_4k=False,
                    zoom_style='in-center', fade_in=False, fade_out=False, transition_duration=0.5,
                    static_no_motion=False, target_size=None):
     """Обрабатывает видео с ретаймингом до нужной длительности + точная обрезка.
     Если input_file — изображение, создаёт зум-видео нужной длины (zoom_style — см. ZOOM_STYLES).
     keep_audio=True  — сохраняет VEO аудио в ретаймленном фрагменте (для script-mode без нарации).
     is_chain_extend=True — trim first N frames (duplicate from prev clip's last_frame) + mute audio (VEO artifacts).
-    real_photo_meta — dict с {credit_text, zoom_direction} для архивных кадров (real_photo stage).
     target_size — целевой размер кадра (w, h) на весь прогон: клип приводится к нему в
     ЛЮБУЮ сторону, а при совпадении размера масштаб не применяется вовсе. Флаги
     upscale_1080/upscale_4k оставлены для старых вызовов и работают как раньше."""
@@ -1391,12 +1255,9 @@ def process_video(input_file, output_file, target_duration, encoder_type, codec,
     # Still image to timeline-compatible video.
     if input_path.suffix.lower() in _IMAGE_EXTENSIONS:
         try:
-            _credit = (real_photo_meta or {}).get('credit_text') if real_photo_meta else None
-            _blur_fill = bool(real_photo_meta)  # blurred bg only for real_photo clips
             _image_to_zoom_video(input_file, output_file, target_duration,
                                  encoder_type, codec, bitrate, logo_path, fps=fps,
                                  keep_audio=keep_audio,
-                                 credit_text=_credit, blur_fill=_blur_fill,
                                  upscale_1080=upscale_1080, upscale_4k=upscale_4k,
                                  zoom_style=zoom_style,
                                  fade_in=fade_in, fade_out=fade_out,
@@ -1728,7 +1589,7 @@ def _iter_clip_still_fallbacks(clip_id, source_file):
 
 def _render_still_fallback(
     input_file, output_file, target_duration, encoder_type, codec, bitrate, *,
-    logo_path=None, fps=60, keep_audio=False, credit_text=None, blur_fill=False,
+    logo_path=None, fps=60, keep_audio=False,
     upscale_1080=False, upscale_4k=False, fade_in=False, fade_out=False,
     transition_duration=0.5, zoom_style='in-center',
     static_no_motion=False, target_size=None,
@@ -1738,7 +1599,6 @@ def _render_still_fallback(
         _image_to_zoom_video(
             input_file, output_file, target_duration, encoder_type, codec, bitrate,
             logo_path=logo_path, fps=fps, keep_audio=keep_audio,
-            credit_text=credit_text, blur_fill=blur_fill,
             upscale_1080=upscale_1080, upscale_4k=upscale_4k,
             fade_in=fade_in, fade_out=fade_out,
             transition_duration=transition_duration, zoom_style=zoom_style,
@@ -2217,12 +2077,6 @@ def main():
     parser.add_argument('-o', '--output', default='result.mp4', help='Выходной файл')
     parser.add_argument('-a', '--audio', default=None, help='Аудио озвучка (по умолчанию ищется любой .wav/.mp3 файл)')
     parser.add_argument('-b', '--bitrate', default='10M', help='Битрейт видео')
-    parser.add_argument('--attribution', dest='attribution', action='store_true', default=None,
-                        help='Плашка источника на кадре («Wikimedia», «Google Images»). '
-                             'По умолчанию ВЫКЛЮЧЕНА — надпись портит продакшн-качество; '
-                             'сама атрибуция остаётся в real_photos_credits.json')
-    parser.add_argument('--no-attribution', dest='attribution', action='store_false',
-                        help='Не рисовать плашку источника (поведение по умолчанию)')
     parser.add_argument('-g', '--group-size', type=int, default=9999, help='Размер группы для склейки (по умолчанию 9999 = один проход)')
     parser.add_argument('-r', '--resolution', default=None, help='Разрешение (1080, 720) — опционально, для совместимости')
     parser.add_argument('--aspect', default=None, choices=['16:9', '9:16', '1:1'],
@@ -2272,12 +2126,6 @@ def main():
             os.getenv('INFOGRAPHIC_STATIC_CONCAT', 'true').strip().lower()
             in ('1', 'true', 'yes', 'on')
         )
-
-    # Плашка источника на кадре: CLI перекрывает ATTRIBUTION_OVERLAY из окружения.
-    # Кладём в окружение, а не в args: рисует её `_drawtext_real_photo` глубоко
-    # в фильтрах, куда args не доходит, и точка решения должна быть одна.
-    if args.attribution is not None:
-        os.environ['ATTRIBUTION_OVERLAY'] = '1' if args.attribution else '0'
 
     # Формат ролика: CLI --aspect перекрывает env VIDEO_TARGET_ASPECT (дефолт 16:9)
     global TARGET_ASPECT
@@ -2768,8 +2616,6 @@ def main():
                         # при несовпадении, в любую сторону (см. process_video).
                         _per_clip_upscale_4k = False
                         _per_clip_upscale = False
-                        # Real Photo: extract credit/zoom meta from clip → image branch will apply blur_fill + drawtext
-                        _rp_meta = clip.get('real_meta') if clip.get('source') == 'real_photo' else None
                         _static_infographic = bool(
                             args.static_infographics and clip.get('source') == 'infographic'
                         )
@@ -2783,7 +2629,6 @@ def main():
                             target_size=_target_size,
                             fps=getattr(args, 'fps', 60),
                             is_chain_extend=is_chain_extend,
-                            real_photo_meta=_rp_meta,
                             fade_in=_fade_in, fade_out=_fade_out,
                             transition_duration=_transition_duration,
                             zoom_style=_clip_zoom_style,
@@ -2799,7 +2644,6 @@ def main():
                                 source_file, str(output_file), adjusted_target,
                                 encoder_type, codec, args.bitrate, **_clip_kwargs)
                         if actual_dur is None:
-                            _rp_meta_fb = clip.get('real_meta') if clip.get('source') == 'real_photo' else None
                             for _fallback_img in _iter_clip_still_fallbacks(clip_id, source_file):
                                 logger.warning(
                                     f"Clip {clip_id}: source {source_file} failed; "
@@ -2811,8 +2655,6 @@ def main():
                                     fps=getattr(args, 'fps', 60),
                                     keep_audio=(getattr(args, 'veo_audio_inline', False)
                                                 or getattr(args, 'keep_veo_sound', False)),
-                                    credit_text=(_rp_meta_fb or {}).get('credit_text') if _rp_meta_fb else None,
-                                    blur_fill=bool(_rp_meta_fb),
                                     upscale_1080=_per_clip_upscale,
                                     upscale_4k=_per_clip_upscale_4k,
                                     target_size=_target_size,

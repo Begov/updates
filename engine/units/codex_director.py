@@ -119,11 +119,10 @@ def _prepare_codex_env() -> tuple[dict, str, bool]:
 def _publish_visual_intent(prompts_path: Path, id_pairs: list) -> int:
     """Положить замысел кадра из Pass 2 в montage_plan как `visual_intent`.
 
-    Зачем. Стадии-источники (сток, ютуб, EPF) и вижн берут описание сцены из
+    Зачем. Стадии-источники (сток) и вижн берут описание сцены из
     плана, а не из файла промптов. Пока Pass 2 писал только в *_prompts_*.txt,
     в стандартном режиме им доставалась сырая озвучка — то есть ЧТО ГОВОРЯТ
-    вместо того, ЧТО ПОКАЗАТЬ. Запросы стадии по-прежнему пишут сами (так же
-    устроен и Auto Visual Story), здесь только контекст.
+    вместо того, ЧТО ПОКАЗАТЬ. Запросы стадии по-прежнему пишут сами, здесь только контекст.
 
     Вызывать ДО приклейки стиля и негатива: стадиям нужна суть сцены.
 
@@ -1327,18 +1326,16 @@ class GptDirector:
 
         # Замысел кадра — в план, ДО приклейки стиля и негатива ниже.
         #
-        # Стадии-источники (сток, ютуб, EPF, вижн) читают описание сцены из
+        # Стадии-источники (сток, вижн) читают описание сцены из
         # montage_plan (`description` / `visual_intent`), а Pass 2 писал его
         # только в *_prompts_*.txt — файл для ГЕНЕРАТОРОВ. Моста между ними не
-        # было (`real_photo._parse_prompts_file` написан, но не вызывается
-        # никем и ждёт другого формата), поэтому в стандартном режиме стадии
+        # было, поэтому в стандартном режиме стадии
         # получали сырую озвучку: артефакт прогона 26.08 — `SCENE: brzegi.
         # Ludzie stoją w przejściach…`, и оператор искал несуществующую
         # польскую деревню Бжеги вместо переполненного зала.
         #
-        # Это бесплатно: Pass 2 уже пишет промпт КАЖДОМУ клипу, включая внешние
-        # (REAL_PHOTO_PROMPT_FALLBACK=1 по умолчанию не скипает архивные, сток
-        # и ютуб не фильтруются вовсе). Берём именно сейчас — стиль и негатив
+        # Это бесплатно: Pass 2 уже пишет промпт КАЖДОМУ клипу, включая внешние.
+        # Берём именно сейчас — стиль и негатив
         # приклеиваются следующими строками, а стадиям нужна суть сцены, а не
         # стилевая простыня.
         _publish_visual_intent(prompts_path, _id_pairs)
@@ -1575,12 +1572,6 @@ class GptDirector:
         except Exception as _ce:                            # noqa: BLE001
             logging.debug('cover_hook: указание не собрано (%s)', _ce)
 
-        # Real Photo markup directive (only if REAL_PHOTO_ENABLED=1).
-        # Текст — из units/archive_tags.py: одна точка правды на оба директора
-        # (chat_director зовёт её же). Режиссёр только ПОМЕЧАЕТ; запросы пишет стадия.
-        from units.archive_tags import real_photo_markup_directive
-        real_photo_suffix = real_photo_markup_directive()
-
         # Stock markup (если STOCK_ENABLED=true). Текст — из units/stock_tags.py:
         # одна точка правды на оба директора (chat_director зовёт её же).
         from units.stock_tags import stock_markup_directive
@@ -1590,9 +1581,9 @@ class GptDirector:
         from units.mograph_tags import motion_graphics_markup_directive
         mograph_suffix = motion_graphics_markup_directive()
 
-        # Тема ролика — якорь для поиска архив/сток материалов (узкий запрос про субъект,
-        # не про страну/эпоху/войну). Нужна только если включён real_photo или сток.
-        _theme_needed = getattr(config, 'REAL_PHOTO_ENABLED', False) or getattr(config, 'STOCK_ENABLED', False)
+        # Тема ролика — якорь для поиска стоковых материалов (узкий запрос про субъект,
+        # не про страну/эпоху/войну). Нужна только если включён сток.
+        _theme_needed = getattr(config, 'STOCK_ENABLED', False)
         theme_line = ('    "theme": "<one clear sentence: genre + main subject + setting/period, from the whole video>",\n'
                       if _theme_needed else '')
         theme_rule = ('- "theme": ONE clear, specific sentence giving the video\'s GENRE, its MAIN '
@@ -1647,7 +1638,7 @@ Rules:
 - Last clip endTime must equal audioDuration ({audio_duration:.2f})
 - IDs sequential: 1, 2, 3, ...
 - File format: "{{id}}.mp4"
-{theme_rule}{real_photo_suffix}{stock_suffix}{infographic_suffix}{mograph_suffix}
+{theme_rule}{stock_suffix}{infographic_suffix}{mograph_suffix}
 Write the JSON file and then report your status in your final response."""
 
     # =========================================================================
@@ -1698,22 +1689,9 @@ Write the JSON file and then report your status in your final response."""
 
         clips = montage_plan.get('clips', [])
 
-        # Real Photo: клипы `source: real_photo_pending` идут в архивный путь (download).
-        # REAL_PHOTO_PROMPT_FALLBACK=1 (дефолт): пишем промпты И для них тоже — страховка,
-        # чтобы при провале/таймауте/зависании загрузки клип догенерился нейросетью по
-        # готовому промпту. С коротким промптом (вынос стиля/негатива) это почти бесплатно.
-        # =0: старое поведение — скип real_photo клипов (экономия токенов, но без страховки).
-        _rp_skipped_count = 0
-        if not getattr(config, 'REAL_PHOTO_PROMPT_FALLBACK', True) and any(c.get('source') == 'real_photo_pending' for c in clips):
-            _all_n = len(clips)
-            clips = [c for c in clips if c.get('source') != 'real_photo_pending']
-            _rp_skipped_count = _all_n - len(clips)
-            if _rp_skipped_count > 0:
-                print(f"   [Real Photo] Pass 2 skip: {_rp_skipped_count} clips (archival path, fallback OFF)")
-
         total_clips = len(clips)
         if total_clips == 0:
-            print("   ❌ Монтажный план пуст (или все клипы — real_photo) — нечего промптировать")
+            print("   ❌ Монтажный план пуст — нечего промптировать")
             return None, 0
 
         chunk_size = config.GPT_PASS2_CHUNK_SIZE or total_clips
