@@ -4,7 +4,6 @@ Video Production Agent - Главный скрипт
 Автоматизация создания видео через AI
 """
 import argparse
-import subprocess
 import sys
 import os
 from pathlib import Path
@@ -16,181 +15,6 @@ import time
 from datetime import datetime as dt
 from typing import Optional, Tuple
 
-
-def _find_macos_tool(name: str) -> Optional[str]:
-    candidates = []
-    for directory in os.environ.get('PATH', '').split(os.pathsep):
-        if directory:
-            candidates.append(Path(directory) / name)
-    candidates.extend([
-        Path('/opt/homebrew/bin') / name,
-        Path('/usr/local/bin') / name,
-    ])
-    for candidate in candidates:
-        try:
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate)
-        except OSError:
-            continue
-    return None
-
-
-def _ensure_macos_ffmpeg() -> None:
-    """Install and expose ffmpeg/ffprobe before a paid video stage starts."""
-    brew_dirs = ['/opt/homebrew/bin', '/usr/local/bin']
-    current_path = os.environ.get('PATH', '')
-    path_parts = [part for part in current_path.split(os.pathsep) if part]
-    os.environ['PATH'] = os.pathsep.join(
-        [part for part in brew_dirs if part not in path_parts] + path_parts
-    )
-
-    ffmpeg = _find_macos_tool('ffmpeg')
-    ffprobe = _find_macos_tool('ffprobe')
-    if ffmpeg and ffprobe:
-        os.environ['BEGO_FFMPEG'] = ffmpeg
-        os.environ['BEGO_FFPROBE'] = ffprobe
-        return
-
-    brew = _find_macos_tool('brew')
-    if not brew:
-        raise RuntimeError(
-            'FFmpeg/ffprobe are missing and Homebrew was not found. '
-            'Run the BegoFrame DMG installer again.'
-        )
-
-    print('[runtime] FFmpeg/ffprobe missing; installing with Homebrew...', flush=True)
-    installed = subprocess.run(
-        [brew, 'install', 'ffmpeg'],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        timeout=1800,
-    )
-    if installed.returncode != 0:
-        detail = (installed.stderr or installed.stdout or '')[-1500:]
-        raise RuntimeError(f'Homebrew could not install FFmpeg: {detail}')
-
-    prefix = subprocess.run(
-        [brew, '--prefix', 'ffmpeg'],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        timeout=60,
-    )
-    if prefix.returncode == 0 and prefix.stdout.strip():
-        ffmpeg_bin = str(Path(prefix.stdout.strip()) / 'bin')
-        os.environ['PATH'] = ffmpeg_bin + os.pathsep + os.environ['PATH']
-
-    ffmpeg = _find_macos_tool('ffmpeg')
-    ffprobe = _find_macos_tool('ffprobe')
-    if not ffmpeg or not ffprobe:
-        subprocess.run(
-            [brew, 'link', '--overwrite', 'ffmpeg'],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=120,
-        )
-        ffmpeg = _find_macos_tool('ffmpeg')
-        ffprobe = _find_macos_tool('ffprobe')
-
-    if not ffmpeg or not ffprobe:
-        raise RuntimeError(
-            'Homebrew completed, but ffmpeg/ffprobe are still unavailable.'
-        )
-
-    os.environ['BEGO_FFMPEG'] = ffmpeg
-    os.environ['BEGO_FFPROBE'] = ffprobe
-    print(f'[runtime] FFmpeg ready: {ffmpeg}', flush=True)
-
-
-def _bootstrap_macos_runtime() -> None:
-    """Run the CLI from BegoFrame's managed venv before third-party imports."""
-    if sys.platform != 'darwin':
-        return
-
-    _ensure_macos_ffmpeg()
-
-    install_root = Path(__file__).resolve().parent.parent
-    managed = install_root / '.venv' / 'bin' / 'python3'
-    requirements = install_root / 'requirements.txt'
-
-    if not managed.is_file():
-        print('[runtime] Creating BegoFrame .venv...', flush=True)
-        created = subprocess.run(
-            [sys.executable, '-m', 'venv', str(install_root / '.venv')],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=300,
-        )
-        if created.returncode != 0 or not managed.is_file():
-            detail = (created.stderr or created.stdout or '')[-1000:]
-            raise RuntimeError(f'Could not create BegoFrame .venv: {detail}')
-
-    probe_imports = (
-        'import assemblyai, tqdm, requests, dotenv, '
-        'colorama, PIL'
-    )
-    probe = subprocess.run(
-        [str(managed), '-c', probe_imports],
-        capture_output=True,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        timeout=90,
-    )
-    if probe.returncode != 0:
-        if not requirements.is_file():
-            raise RuntimeError(f'requirements.txt not found: {requirements}')
-        print('[runtime] Installing BegoFrame dependencies...', flush=True)
-        installed = subprocess.run(
-            [
-                str(managed), '-m', 'pip', 'install',
-                '-r', str(requirements),
-                '--disable-pip-version-check',
-                '--prefer-binary',
-                '--default-timeout=120',
-                '--retries', '3',
-            ],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=1200,
-        )
-        if installed.returncode != 0:
-            detail = (installed.stderr or installed.stdout or '')[-1500:]
-            raise RuntimeError(f'Could not install BegoFrame dependencies: {detail}')
-
-        probe = subprocess.run(
-            [str(managed), '-c', probe_imports],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=90,
-        )
-        if probe.returncode != 0:
-            detail = (probe.stderr or probe.stdout or '')[-1000:]
-            raise RuntimeError(f'BegoFrame .venv verification failed: {detail}')
-
-    try:
-        already_managed = (
-            Path(sys.prefix).resolve() == (install_root / '.venv').resolve()
-        )
-    except OSError:
-        already_managed = False
-    if not already_managed:
-        print(f'[runtime] Switching Pipeline to {managed}', flush=True)
-        os.execve(str(managed), [str(managed), *sys.argv], os.environ.copy())
-
-
-_bootstrap_macos_runtime()
 
 from tqdm import tqdm
 
@@ -239,8 +63,6 @@ from units.inbox_manager import (
     get_sg_all_file,
     get_all_style_guides_for_audio,
     setup_project,
-    create_process_batch_files,
-    create_fragment_checker
 )
 from units.fastgen_engine import generate_all_images
 from units.veo_motion import generate_all_videos as veo_generate_all_videos

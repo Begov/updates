@@ -109,7 +109,5 @@ def open_path(path) -> None:
     target = str(path)
     if sys.platform == "win32":
         os.startfile(target)  # noqa: S606
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", target])
     else:
         subprocess.Popen(["xdg-open", target])

@@ -48,18 +48,7 @@ def _verify_video_integrity(path: Path) -> bool:
         or shutil.which('ffprobe')
     )
     if not ffprobe:
-        for candidate in (
-            Path('/opt/homebrew/bin/ffprobe'),
-            Path('/usr/local/bin/ffprobe'),
-        ):
-            if candidate.is_file():
-                ffprobe = str(candidate)
-                break
-    if not ffprobe:
-        raise FileNotFoundError(
-            'ffprobe is unavailable; the macOS runtime installer must run '
-            'before video integrity checks'
-        )
+        raise FileNotFoundError('ffprobe is unavailable: install FFmpeg (ffmpeg and ffprobe in PATH)')
 
     try:
         if not path.exists() or path.stat().st_size < 1024:

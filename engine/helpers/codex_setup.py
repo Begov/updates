@@ -156,7 +156,7 @@ def main() -> int:
     system = platform.system()
     if system == "Windows":
         ok = install_windows()
-    elif system in ("Darwin", "Linux"):
+    elif system == "Linux":
         ok = install_unix()
     else:
         print(f"[ERROR] Платформа {system} не поддерживается: https://github.com/openai/codex/releases/latest")

@@ -925,9 +925,6 @@ def _resolve_credit_font():
     # системный fallback по ОС
     if sys.platform == 'win32':
         _sys_fonts = [r'C:\Windows\Fonts\arial.ttf', r'C:\Windows\Fonts\segoeui.ttf']
-    elif sys.platform == 'darwin':
-        _sys_fonts = ['/System/Library/Fonts/Supplemental/Arial.ttf',
-                      '/Library/Fonts/Arial.ttf', '/System/Library/Fonts/Helvetica.ttc']
     else:
         _sys_fonts = ['/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
                       '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf']
@@ -2219,7 +2216,7 @@ def group_concat(file_list, output_file, temp_dir, group_size=9999, sub_path=Non
 
         if sub_path:
             # FFmpeg ass= filter chokes on non-ASCII paths — copy to system temp (guaranteed ASCII)
-            # Also set fontsdir= so libass finds Book Antiqua from agent/fonts/ on macOS
+            # Also set fontsdir= so libass finds Book Antiqua from engine/fonts/
             import shutil as _shutil, tempfile as _tempfile
             _ass_src = Path(sub_path).absolute()
             _ass_safe = Path(_tempfile.gettempdir()) / '_begoframe_subs.ass'
@@ -2257,7 +2254,7 @@ def group_concat(file_list, output_file, temp_dir, group_size=9999, sub_path=Non
             except subprocess.CalledProcessError:
                 if not _fonts_dir:
                     raise
-                # Some Homebrew FFmpeg/libass builds reject the optional
+                # Some FFmpeg/libass builds reject the optional
                 # fontsdir argument even though the ass filter is available.
                 logger.warning("Subtitle burn-in failed with fontsdir; retrying without fontsdir")
                 print("   [SUBTITLES] fontsdir unsupported; retrying with system font fallback...")

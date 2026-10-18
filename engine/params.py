@@ -12,7 +12,7 @@ if not _ENV_PATH.exists():
     # Свежая установка: в дистрибутиве едет только .env.example — сам .env не
     # кладётся ни в DMG, ни в патч (он в SKIP_ON_INSTALL). Без файла редактор
     # настроек в GUI молча пуст, и человек не понимает, куда вписывать ключи
-    # (улов на macOS 29.08). Создаём из примера — со всеми пустыми полями.
+    # Создаём из примера — со всеми пустыми полями.
     # Берём `default_env.txt` — это копия раздаточного .env: все 397 строк с
     # дефолтами и токен приёма обновлений, личные ключи вычищены. Имя без
     # точки в начале намеренно: publisher исключает из патча всё, что
@@ -295,12 +295,7 @@ elif sys.platform == 'win32':
     else:
         CODEX_EXE_PATH = _shutil.which('codex') or ''
 else:
-    # macOS / Linux: PATH may be stale when the standalone installer just ran.
-    _codex_found = _shutil.which('codex')
-    if not _codex_found and sys.platform == 'darwin':
-        _codex_native = os.path.expanduser('~/.local/bin/codex')
-        _codex_found = _codex_native if os.path.isfile(_codex_native) else ''
-    CODEX_EXE_PATH = _codex_found or ''
+    CODEX_EXE_PATH = _shutil.which('codex') or ''
 
 # Модель GPT для режиссуры через Codex
 GPT_MODEL = _model('GPT_MODEL', 'gpt-5.4')  # default: full model, not mini
