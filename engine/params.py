@@ -1773,19 +1773,6 @@ REAL_PHOTO_VISION_CANDIDATES = max(0, int(os.getenv('REAL_PHOTO_VISION_CANDIDATE
 REAL_PHOTO_EPF_SEARCH_TIMEOUT = max(
     30, int(os.getenv('REAL_PHOTO_EPF_SEARCH_TIMEOUT', '180') or '180')
 )
-REAL_PHOTO_EPF_DOWNLOAD_URL = (
-    os.getenv(
-        'REAL_PHOTO_EPF_DOWNLOAD_URL',
-        'https://drive.google.com/file/d/'
-        '1xDYIqq6SKQDBEKJKaa9U_mB10I8nfZsy/view?usp=sharing',
-    ).strip()
-    or 'https://drive.google.com/file/d/'
-       '1xDYIqq6SKQDBEKJKaa9U_mB10I8nfZsy/view?usp=sharing'
-)
-REAL_PHOTO_EPF_DOWNLOAD_SHA256 = os.getenv(
-    'REAL_PHOTO_EPF_DOWNLOAD_SHA256',
-    'C3AE2A7F574511F915E66C6C717372BE3AE58B01331D4EA3C3836F4843489A5F',
-).strip().upper()
 REAL_PHOTO_VISION_PROVIDER = (
     os.getenv('REAL_PHOTO_VISION_PROVIDER', 'codex') or 'codex'
 ).strip().lower()
