@@ -111,7 +111,6 @@ def resolve_text_operator(stage: str = "") -> tuple[str, str]:
     stage_keys = {
         "youtube": ("YOUTUBE_QUERY_PROVIDER", "YOUTUBE_QUERY_MODEL"),
         "stock": ("STOCK_PROMPT_PROVIDER", "STOCK_PROMPT_MODEL"),
-        "music": ("MUSIC_PROMPT_PROVIDER", "MUSIC_PROMPT_MODEL"),
         "real_photo": ("REAL_PHOTO_PROMPT_PROVIDER", "REAL_PHOTO_PROMPT_MODEL"),
         "style_extract": ("STYLE_EXTRACT_BACKEND", "STYLE_EXTRACT_MODEL"),
     }

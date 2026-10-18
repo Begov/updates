@@ -139,7 +139,6 @@ def stage_env(v: dict) -> dict:
     # Референсов нет: движок не копирует их в проект (даже из inbox/ref/) и не берёт из ref/ проекта
     m["BEGO_REFS_DISABLED"] = "1"
     m["STYLE_EXTRACT_MODE"] = "off"
-    m["BEGO_MUSIC_ENABLED"] = "0"
     m.update(cinai_video_env(v))
     return m
 

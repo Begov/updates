@@ -2465,10 +2465,6 @@ def main():
     parser.add_argument('-o', '--output', default='result.mp4', help='Выходной файл')
     parser.add_argument('-a', '--audio', default=None, help='Аудио озвучка (по умолчанию ищется любой .wav/.mp3 файл)')
     parser.add_argument('-b', '--bitrate', default='10M', help='Битрейт видео')
-    parser.add_argument('--music-plan', default=None,
-                        help='Путь к music_plan.json для наложения фоновой музыки (Suno tracks)')
-    parser.add_argument('--music-dir', default=None,
-                        help='Папка с MP3-треками. По умолчанию music/ рядом с music_plan.json')
     parser.add_argument('--entity-overlays', dest='entity_overlays', action='store_true', default=None,
                         help='Карточки персон/мест (Wikipedia) поверх видео')
     parser.add_argument('--no-entity-overlays', dest='entity_overlays', action='store_false',
@@ -3354,42 +3350,6 @@ def main():
                 logger.error(f"Entity overlays failed: {_ee}")
                 logger.error(traceback.format_exc())
                 print(f"   ⚠️  Entity overlays skipped: {_ee}")
-
-        # ЭТАП 8.5: НАЛОЖЕНИЕ ФОНОВОЙ МУЗЫКИ (если задан --music-plan)
-        if getattr(args, 'music_plan', None):
-            try:
-                logger.info("ЭТАП 8.5: НАЛОЖЕНИЕ ФОНОВОЙ МУЗЫКИ (music_plan)")
-                print(f"\n🎼 Накладываю фоновую музыку из {args.music_plan}...")
-                import sys as _sys
-                _agent_dir = (Path(__file__).resolve().parent / 'agent')
-                if str(_agent_dir) not in _sys.path:
-                    _sys.path.insert(0, str(_agent_dir))
-                from units.soundtrack_mix import apply_music_to_video as _apply_music
-
-                _music_dir = args.music_dir or str(Path(args.music_plan).parent / 'music')
-                _out = Path(args.output)
-                _with_music = _out.with_name(_out.stem + '_with_music' + _out.suffix)
-
-                _apply_music(
-                    input_video=args.output,
-                    music_plan_path=args.music_plan,
-                    music_dir=_music_dir,
-                    output_video=_with_music,
-                    ffmpeg_path=FFMPEG,
-                )
-
-                # Подменяем основной output на версию с музыкой, оригинал → _no_music
-                _no_music = _out.with_name(_out.stem + '_no_music' + _out.suffix)
-                shutil.copy2(args.output, _no_music)
-                shutil.move(str(_with_music), args.output)
-                logger.info(f"Музыка наложена. Без музыки: {_no_music.name}")
-                print(f"   ✅ {args.output} ← версия с музыкой")
-                print(f"   💾 {_no_music.name} ← версия без музыки (на случай отката)")
-            except Exception as _me:
-                logger.error(f"Music mix failed: {_me}")
-                logger.error(traceback.format_exc())
-                print(f"\n⚠️  Не удалось наложить музыку: {_me}")
-                print(f"   Финальный файл — без музыки.")
 
         # ЭТАП 9: ОЧИСТКА
         logger.info("ЭТАП 9: ОЧИСТКА")

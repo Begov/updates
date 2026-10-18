@@ -57,18 +57,6 @@ def _model(key: str, default: str = '') -> str:
     return os.getenv(key, default).split('#')[0].strip()
 
 
-def _db_env(key: str, default: str) -> int:
-    """Read a dB env value. Positive UI values like 16 mean -16 dB."""
-    raw = os.getenv(key, default).split('#')[0].strip()
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        value = float(default)
-    if value > 0:
-        value = -value
-    value = max(-60.0, min(0.0, value))
-    return int(round(value))
-
 # ============================================================================
 # API КЛЮЧИ
 # ============================================================================
@@ -405,19 +393,6 @@ CLAUDE_API_REFERER = os.getenv(
     'https://ccmaxshop.de5.net/',
 ).strip()
 
-# ============================================================================
-# MUSIC (Pass 3) — Suno cookie auth + music director
-# ============================================================================
-MUSIC_PROVIDER = os.getenv('MUSIC_PROVIDER', 'suno').strip().lower()
-MUSIC_SAFE_MODE = os.getenv('MUSIC_SAFE_MODE', 'true').lower() in ('true', '1', 'yes', 'on')
-MUSIC_ALLOW_CONTENT_ID = os.getenv('MUSIC_ALLOW_CONTENT_ID', 'false').lower() in ('true', '1', 'yes', 'on')
-
-# Local Sound Library — папка с личной музыкой (провайдер local_library).
-# Задаётся в GUI (блок Music). Пусто = ищем только в проекте
-# (music_stock/ или stock_music/) — старое поведение.
-MUSIC_LIBRARY_DIR = os.getenv('MUSIC_LIBRARY_DIR', '').strip()
-
-MUSIC_STOCK_PROVIDER = os.getenv('MUSIC_STOCK_PROVIDER', 'pixabay').strip().lower()
 
 # ============================================================================
 # STOCK (Pexels / Pixabay / Local Stock Library) — сток-футаж и фото
@@ -656,72 +631,7 @@ PEXELS_TEMP_KEY = os.getenv('PEXELS_TEMP_KEY', '').strip()
 PIXABAY_API_KEY = os.getenv('PIXABAY_API_KEY', '').strip()
 PIXABAY_API_KEY_2 = os.getenv('PIXABAY_API_KEY_2', '').strip()
 PIXABAY_API_KEY_3 = os.getenv('PIXABAY_API_KEY_3', '').strip()
-MUSIC_STOCK_FALLBACK_PROCEDURAL = os.getenv(
-    'MUSIC_STOCK_FALLBACK_PROCEDURAL', 'false'
-).lower() in ('true', '1', 'yes', 'on')
 
-# Браузер для извлечения Suno cookies. Chrome v127+ (App-Bound Encryption) не
-# читается без admin/rookiepy — рекомендуется firefox или edge.
-SUNO_COOKIE_BROWSER = os.getenv('SUNO_COOKIE_BROWSER', 'firefox').lower().strip()
-
-# Suno model: chirp-fenix (v5.5), chirp-v3-5, chirp-v4
-SUNO_MODEL = _model('SUNO_MODEL', 'chirp-fenix')
-
-# Параллельные потоки music_orchestrator (1 = последовательно; не >2-3 из-за rate-limit).
-SUNO_PARALLEL = int(os.getenv('SUNO_PARALLEL', '1'))
-
-# Sleep между sequential генерациями (sec) — против Suno 422 rate-limit.
-SUNO_INTER_TRACK_SLEEP = int(os.getenv('SUNO_INTER_TRACK_SLEEP', '30'))
-
-# Громкость музыки в финальном миксе. Положительное 16 = -16 dB.
-MUSIC_DEFAULT_VOLUME_DB = _db_env('MUSIC_DEFAULT_VOLUME_DB', '-21')
-MUSIC_MIX_MAX_VOLUME_DB = _db_env('MUSIC_MIX_MAX_VOLUME_DB', '0')
-
-# На сколько dB музыка душится под голосом (sidechain compressor).
-MUSIC_DUCKING_DB = _db_env('MUSIC_DUCKING_DB', '-5')
-MUSIC_SIDECHAIN_THRESHOLD_DB = int(os.getenv('MUSIC_SIDECHAIN_THRESHOLD_DB', '-25'))
-MUSIC_SIDECHAIN_RATIO = float(os.getenv('MUSIC_SIDECHAIN_RATIO', '0') or '0')
-MUSIC_SIDECHAIN_ATTACK_MS = int(os.getenv('MUSIC_SIDECHAIN_ATTACK_MS', '25'))
-MUSIC_SIDECHAIN_RELEASE_MS = int(os.getenv('MUSIC_SIDECHAIN_RELEASE_MS', '800'))
-
-# Crossfade между соседними треками (мс)
-MUSIC_CROSSFADE_MS = int(os.getenv('MUSIC_CROSSFADE_MS', '2000'))
-
-# Music plan simplification — coarse long beds, concat trims/loops them.
-MUSIC_MIN_TRACK_DURATION = int(os.getenv('MUSIC_MIN_TRACK_DURATION', '120'))
-MUSIC_MAX_TRACK_DURATION = int(os.getenv('MUSIC_MAX_TRACK_DURATION', '240'))
-MUSIC_MAX_TRACKS = int(os.getenv('MUSIC_MAX_TRACKS', '10'))
-
-# Повтор упавшей генерации трека (Suno роняет отдельные клипы: таймаут,
-# 5xx, rate-limit). Без повтора слот остаётся немым.
-MUSIC_TRACK_RETRIES = int(os.getenv('MUSIC_TRACK_RETRIES', '1'))
-# Cloudflare Turnstile: после капчи ждём и пробуем снова, а не жжём ретраи.
-MUSIC_CAPTCHA_COOLDOWN = int(os.getenv('MUSIC_CAPTCHA_COOLDOWN', '600'))
-MUSIC_CAPTCHA_RETRIES = int(os.getenv('MUSIC_CAPTCHA_RETRIES', '2'))
-
-# Synthetic FFmpeg noise-bed fallback is opt-in only. It is not music and must
-# never silently replace a failed Suno generation.
-MUSIC_FALLBACK_ON_SUNO_FAIL = os.getenv(
-    'MUSIC_FALLBACK_ON_SUNO_FAIL', 'false'
-).lower() in ('true', '1', 'yes')
-MUSIC_FALLBACK_MODE = os.getenv('MUSIC_FALLBACK_MODE', 'off').strip().lower()
-# Suno runs in a background project process. Concat waits only here, after
-# visual work has finished, so network music generation does not hold it up.
-MUSIC_BACKGROUND_WAIT_TIMEOUT = int(
-    os.getenv('MUSIC_BACKGROUND_WAIT_TIMEOUT', '1200')
-)
-
-# Backend для Music Director — gpt (Codex), deepseek/openrouter (chat),
-# claude_code или claude_api. Пусто = наследует DIRECTOR_BACKEND.
-MUSIC_DIRECTOR_BACKEND = os.getenv('MUSIC_DIRECTOR_BACKEND', '').strip().lower()
-
-# Конкретная модель (slug) для music-режиссёра при chat-backend (deepseek/openrouter).
-# Пусто = провайдерский дефолт (OPENROUTER_MODEL / DEEPSEEK_MODEL). Позволяет писать
-# музыкальный план любой моделью независимо от модели основного director'а.
-MUSIC_CHAT_MODEL = _model('MUSIC_CHAT_MODEL', '')
-if MUSIC_DIRECTOR_BACKEND == 'claude_api':
-    MUSIC_CHAT_MODEL = _normalize_claude_nexus_model(
-        MUSIC_CHAT_MODEL)
 
 # ============================================================================
 # ENTITY OVERLAY (карточки персон/мест из Wikipedia поверх видео)

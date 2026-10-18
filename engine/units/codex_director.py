@@ -64,7 +64,6 @@ _CODEX_STAGE_NAMES = {
     'visual_story_chapter_plan': 'сочинение главы',
     'pass1_control': 'монтажный план (Pass 1)',
     'pass2_control': 'промптаж (Pass 2)',
-    'music_plan_control': 'музыкальный план',
 }
 
 # Этапы Auto Visual Story на Codex идут файловым контрактом (25.08): схема у
