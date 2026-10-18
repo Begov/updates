@@ -305,11 +305,6 @@ class FastGenClient:
             return aspect
         return FastGenClient._ASPECT_MAP.get(aspect.lower() if aspect else '', 'IMAGE_ASPECT_RATIO_LANDSCAPE')
 
-    @staticmethod
-    def _map_aspect_grok(aspect: str) -> str:
-        """Нормализовать aspect_ratio в формат Grok"""
-        return FastGenClient._ASPECT_MAP_GROK.get(aspect.lower() if aspect else '', '16:9')
-
     # ------------------------------------------------------------------
     # V6 API: универсальный endpoint /v6/generations с named refs.
     # Используется для flow-моделей когда требуется token-based ref-binding
@@ -1271,17 +1266,6 @@ class FastGenClient:
             logging.warning(f"Usage check failed ({resp.status_code}): {body}")
             raise FastGenUsageError(f"Usage check failed ({resp.status_code}): {body}")
         return resp.json()
-
-    @staticmethod
-    def _image_to_b64_data_uri(path: str) -> str:
-        """Load image file → 'data:image/<ext>;base64,...' data URI for API."""
-        import base64 as _b64
-        p = Path(path)
-        ext = p.suffix.lower().lstrip(".") or "jpeg"
-        mime_map = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}
-        mime = mime_map.get(ext, "jpeg")
-        b64 = _b64.b64encode(p.read_bytes()).decode("ascii")
-        return f"data:image/{mime};base64,{b64}"
 
     def cancel_all_tasks(self) -> dict:
         """

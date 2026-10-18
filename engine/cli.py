@@ -2801,24 +2801,12 @@ def cmd_process_queue(args):
     run_pipeline = getattr(args, 'run', False)
     language_code = getattr(args, 'language', None) or config.ASSEMBLYAI_LANGUAGE_CODE
 
-    # Override backend from CLI
-    if getattr(args, 'director_backend', None):
-        config.DIRECTOR_BACKEND = args.director_backend
-    if getattr(args, 'director_profile', None):
-        config.DIRECTOR_PROFILE = args.director_profile
-    director_profile = (
-        getattr(args, 'director_profile', None)
-        or getattr(config, 'DIRECTOR_PROFILE', 'standard')
-        or 'standard'
-    ).strip().lower()
-
     # Логгирование — сразу при старте, всегда
     log_dir = Path(__file__).parent / 'logs'
     log_file = setup_logging(log_dir)
 
-    backend_label = 'GPT' if config.DIRECTOR_BACKEND == 'gpt' else 'Claude'
     print("\n" + "="*60)
-    print(f"ОБРАБОТКА ОЧЕРЕДИ — Director: {backend_label}")
+    print("ОБРАБОТКА ОЧЕРЕДИ — Director: GPT (Codex)")
     if run_pipeline:
         print("+ АВТОЗАПУСК ПАЙПЛАЙНА (транскрипция + режиссура)")
     print("="*60)
@@ -2826,8 +2814,6 @@ def cmd_process_queue(args):
 
     # Выбор режима: видео / слайдшоу / вислайд
     clip_mode = getattr(args, 'clip_mode', None)
-    if director_profile == 'auto_visual_story':
-        clip_mode = 'slideshow'
     vislide_interval = getattr(args, 'vislide_interval', 0) or 0
     print()
     if clip_mode == 'slideshow':
@@ -3207,12 +3193,6 @@ def cmd_process_queue(args):
                             str(project_dir),
                             project_name,
                             two_pass=getattr(args, 'two_pass', False),
-                            director_profile=director_profile,
-                            visual_story_step=(
-                                'analyze'
-                                if director_profile == 'auto_visual_story'
-                                else 'full'
-                            ),
                         )
                         logging.info(f"Режиссерский анализ завершен: {project_dir}")
                         # Тут закончена ТОЛЬКО режиссура: план и промпты. Впереди
@@ -3235,114 +3215,11 @@ def cmd_process_queue(args):
 
                         # Пост-пайплайн генерация: silent если передан --post-action, иначе интерактивно
                         post_action = getattr(args, 'post_action', None)
-                        if director_profile == 'auto_visual_story':
-                            post_action = 'skip'
                         prompt_mode = getattr(args, 'prompt_mode', 'single')
                         # Передаём vislide_interval через env var (как остальные runtime-параметры)
                         if clip_mode == 'vislide' and vislide_interval >= 2:
                             os.environ['BEGO_VISLIDE_INTERVAL'] = str(vislide_interval)
-                        if director_profile == 'auto_visual_story':
-                            print(
-                                "  [Auto Visual Story] analysis ready; starting EPF/materialization"
-                            )
-                            direct_project(
-                                str(transcription_path),
-                                str(style_path),
-                                str(project_dir),
-                                project_name,
-                                director_profile=director_profile,
-                                visual_story_step='search',
-                            )
-                            direct_project(
-                                str(transcription_path),
-                                str(style_path),
-                                str(project_dir),
-                                project_name,
-                                director_profile=director_profile,
-                                visual_story_step='finalize',
-                            )
-                            if getattr(config, 'VEONONSTOP_I2V_PARALLAX', False):
-                                try:
-                                    from units.parallax_autopick import (
-                                        run_auto_visual_parallax,
-                                    )
-                                    _auto_story_parallax = (
-                                        run_auto_visual_parallax(
-                                            project_dir,
-                                            veo_generate_all_videos,
-                                        )
-                                    )
-                                    _auto_story_photo_ids = (
-                                        _auto_story_parallax['eligible_ids']
-                                    )
-                                    _auto_story_parallax_ids = (
-                                        _auto_story_parallax['selected_ids']
-                                    )
-                                    _auto_story_every_n = (
-                                        _auto_story_parallax['every_n']
-                                    )
-                                    # Вид параллакса пишем всегда: шаблоны ведут
-                                    # себя по-разному (2 «строгий» запрещает
-                                    # любое движение внутри кадра, кроме камеры),
-                                    # и без этой строки по логу не понять, почему
-                                    # оживление выглядит как обычный наезд.
-                                    _px_method = getattr(
-                                        config, 'VEONONSTOP_I2V_PARALLAX_METHOD', 1)
-                                    # Название берём из общей точки правды: в
-                                    # локальном словаре не было режима 0
-                                    # («вперемешку»), и лог показывал «шаблон 0 (?)».
-                                    from units.parallax_core import parallax_method_name
-                                    _px_label = parallax_method_name(_px_method)
-                                    if _auto_story_parallax_ids:
-                                        print(
-                                            f"  [Параллакс] шаблон {_px_method} "
-                                            f"({_px_label}) → "
-                                            f"{len(_auto_story_parallax_ids)} из "
-                                            f"{len(_auto_story_photo_ids)} фото-клипов, "
-                                            f"каждый {_auto_story_every_n}-й: "
-                                            f"{_auto_story_parallax_ids}"
-                                        )
-                                        _auto_story_parallax_result = (
-                                            _auto_story_parallax['result'] or {}
-                                        )
-                                        _px_done = _auto_story_parallax_result.get(
-                                            'generated', 0)
-                                        print(f"  [Параллакс] готово: {_px_done} видео")
-                                        logging.info(
-                                            "Параллакс: шаблон %s (%s), каждый %s-й, "
-                                            "клипы %s из %s пригодных, сделано %s",
-                                            _px_method, _px_label, _auto_story_every_n,
-                                            _auto_story_parallax_ids,
-                                            len(_auto_story_photo_ids), _px_done,
-                                        )
-                                    else:
-                                        print(
-                                            f"  [Параллакс] шаблон {_px_method} "
-                                            f"({_px_label}) включён, но пригодных "
-                                            "фото-клипов не нашлось — склейка "
-                                            "сделает зум"
-                                        )
-                                        logging.info(
-                                            "Параллакс: шаблон %s (%s) включён, "
-                                            "пригодных фото-клипов нет (каждый %s-й "
-                                            "из %s) — склейка сделает зум",
-                                            _px_method, _px_label, _auto_story_every_n,
-                                            len(_auto_story_photo_ids),
-                                        )
-                                except Exception as _auto_story_parallax_exc:
-                                    print(
-                                        "  [Auto Visual Story/Parallax] "
-                                        f"stage failed; concat will use zoom: "
-                                        f"{_auto_story_parallax_exc}"
-                                    )
-                                    logging.exception(
-                                        "Auto Visual Story parallax stage failed"
-                                    )
-                            print(
-                                "  [Auto Visual Story] EPF/materialization complete; "
-                                "remaining stills will use FFmpeg zoom"
-                            )
-                        elif post_action:
+                        if post_action:
                             _run_post_pipeline_silent(
                                 str(project_dir), post_action, prompt_mode,
                                 use_codex_adapt=getattr(args, 'codex_adapt', False),
@@ -3513,15 +3390,6 @@ def main():
                                 help='JSON-маппинг {"audio.wav": "/path/staging/"} индивидуальных рефов (из GUI)')
     parser_process.add_argument('--run', action='store_true',
                                 help='Запустить полный пайплайн (транскрипция + режиссура) сразу после настройки каждого проекта')
-    parser_process.add_argument('--director-backend', type=str, default=None,
-                                choices=['gpt', 'claude', 'claude_api'],
-                                help='Backend режиссуры: gpt (Codex CLI, по умолчанию), claude или claude_api')
-    parser_process.add_argument(
-        '--director-profile',
-        choices=['standard', 'auto_visual_story'],
-        default=None,
-        help='Director behavior profile (default: DIRECTOR_PROFILE from config)',
-    )
     parser_process.add_argument('--two-pass', action='store_true', default=False,
                                 help='Двухпроходный режим для режиссуры (для проектов > 15 мин)')
     parser_process.add_argument('--language', choices=config.ASSEMBLYAI_SUPPORTED_LANGUAGES,

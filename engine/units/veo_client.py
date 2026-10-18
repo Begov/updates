@@ -636,23 +636,6 @@ class VeoNonStopClient:
     # Картинки: submit
     # ==================================================================
 
-    def submit_imagen(
-        self,
-        prompt: str,
-        aspect_ratio: Optional[str] = None,
-    ) -> str:
-        """
-        Imagen 3.5 text-to-image (синхронный API).
-
-        Returns:
-            mediaGenerationId
-        """
-        body = {
-            'prompt': prompt,
-            'aspect_ratio': aspect_ratio or config.VEONONSTOP_ASPECT_RATIO,
-        }
-        return self._submit('/image/generate', body)
-
     def generate_imagen(
         self,
         prompt: str,
@@ -673,32 +656,6 @@ class VeoNonStopClient:
             output_path=output_path,
             aspect_ratio=aspect_ratio,
         )
-
-    def submit_banana(
-        self,
-        prompt: str,
-        aspect_ratio: Optional[str] = None,
-        num_images: int = 1,
-        model_key: Optional[str] = None,
-        reference_images: Optional[List[Dict[str, str]]] = None,
-    ) -> str:
-        """
-        Banana Pro text-to-image (+ optional style references).
-
-        Args:
-            reference_images: [{image_base64, mime_type}, ...] для стиль-трансфера
-        Returns:
-            taskId для поллинга
-        """
-        body = {
-            'prompt': prompt,
-            'aspect_ratio': aspect_ratio or config.VEONONSTOP_ASPECT_RATIO,
-            'num_images': num_images,
-            'model_key': model_key or config.VEONONSTOP_BANANA_MODEL,
-        }
-        if reference_images:
-            body['reference_images'] = reference_images
-        return self._submit('/image/banana/generate', body)
 
     def generate_banana(
         self,
@@ -820,24 +777,6 @@ class VeoNonStopClient:
             return BananaResult(str(out), media_id=_mid, project_id=_proj_id)
 
         raise VeoNonStopError(f"Cannot extract image from banana response: {resp_json}")
-
-    def submit_banana_with_refs(
-        self,
-        prompt: str,
-        ref_dir: str,
-        aspect_ratio: Optional[str] = None,
-        num_images: int = 1,
-        model_key: Optional[str] = None,
-    ) -> str:
-        """Banana Pro + загрузка reference_images из папки ref/."""
-        refs = _load_ref_images(ref_dir)
-        return self.submit_banana(
-            prompt=prompt,
-            aspect_ratio=aspect_ratio,
-            num_images=num_images,
-            model_key=model_key,
-            reference_images=refs or None,
-        )
 
     def upscale_banana(
         self,

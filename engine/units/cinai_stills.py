@@ -39,33 +39,6 @@ _TOKEN_STORAGE_KEYS = (
 )
 _REFRESH_TOKEN_STORAGE_KEY = "refresh_token"
 
-def extract_access_token(storage: Dict[str, Any]) -> str:
-    """Return the first plausible Studio bearer token from localStorage."""
-    for key in _TOKEN_STORAGE_KEYS:
-        value = storage.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-        if isinstance(value, dict):
-            for nested in ("access_token", "token", "value"):
-                candidate = value.get(nested)
-                if isinstance(candidate, str) and candidate.strip():
-                    return candidate.strip()
-    return ""
-
-
-def extract_refresh_token(storage: Dict[str, Any]) -> str:
-    """Return the refresh credential captured by the Studio login flow."""
-    value = storage.get(_REFRESH_TOKEN_STORAGE_KEY)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    if isinstance(value, dict):
-        for nested in ("refresh_token", "token", "value"):
-            candidate = value.get(nested)
-            if isinstance(candidate, str) and candidate.strip():
-                return candidate.strip()
-    return ""
-
-
 def _jwt_expiry_epoch(token: Optional[str]) -> Optional[int]:
     value = (token or "").strip()
     parts = value.split(".")

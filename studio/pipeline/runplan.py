@@ -62,9 +62,8 @@ def subtitles_template(v: dict) -> str:
 def stage_env(v: dict) -> dict:
     """Настройки стадий (сток / инфографика) -> env."""
     m: dict = {}
-    # Возможностей «Реальные фото», карточек персон/мест, атрибуции и «Авто-видеоистории» в программе нет.
+    # Возможностей «Реальные фото», карточек персон/мест и атрибуции в программе нет.
     # Выключаем их явно, чтобы старые значения из engine/.env не включили их обратно.
-    m["DIRECTOR_PROFILE"] = "standard"
     m["REAL_PHOTO_ENABLED"] = "false"
     m["REAL_PHOTO_EPF_BRIDGE"] = "0"
     m["NON_AI_IMAGE_MODE"] = "false"
@@ -462,7 +461,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         "BEGO_INFLIGHT_MODE": "1" if v["inflight_mode"] else "0",
         "BEGO_SKIP_PREFLIGHT": "1" if v["skip_preflight"] else "0",
         "STORY_MODE": "off",                         # сюжетный режим убран: клипы независимые
-        "DIRECTOR_PROFILE": "standard",
         "PIPELINE_IMG_GEN": ig,
         # режим видео — из формы, а не из engine/.env: по нему движок решает, разрешена ли
         # нейрогенерация и нужна ли очередь видео (см. units/source_quota.py)
@@ -547,7 +545,7 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
 # Переменные, которые читает только режиссура: после готового плана их смена на файл не влияет
 DIRECTION_ONLY_ENV = frozenset({
     "GPT_MODEL", "GPT_PROVIDER", "GPT_PASS2_CHUNK_SIZE", "GPT_PASS2_PARALLEL", "DIRECTOR_BACKEND",
-    "DIRECTOR_PROFILE", "ASSEMBLYAI_LANGUAGE_CODE", "INTRO_BLOCK_DURATION", "INTRO_CLIP_MIN_DURATION",
+    "ASSEMBLYAI_LANGUAGE_CODE", "INTRO_BLOCK_DURATION", "INTRO_CLIP_MIN_DURATION",
     "INTRO_CLIP_MAX_DURATION", "VIDEO_CLIP_MIN_DURATION", "VIDEO_CLIP_MAX_DURATION",
 })
 # Переменные, которые читает только склейка (она берёт их отдельно, см. `concat_inputs`)
@@ -614,8 +612,7 @@ def build_run(v: dict, source: Path, binding: FileBinding, python: str,
     process = [python, str(paths.CLI), "process", "--run",
                "--language", v["language"], "--clip-mode", v["clip_mode"],
                "--clip-min", str(v["clip_min"]), "--clip-max", str(v["clip_max"]),
-               "--post-action", post_action, "--prompt-mode", v["prompt_mode"],
-               "--director-profile", "standard"]
+               "--post-action", post_action, "--prompt-mode", v["prompt_mode"]]
     if v["clip_mode"] == "vislide":
         process += ["--vislide-interval", str(v["vislide_interval"])]
     if two_pass:
@@ -655,8 +652,6 @@ def build_run(v: dict, source: Path, binding: FileBinding, python: str,
         "intro_clip_max": int(v["intro_clip_max"]),
         "clip_min": int(v["clip_min"]),
         "clip_max": int(v["clip_max"]),
-        "director_backend": "gpt",
-        "director_profile": "standard",
         "gpt_model": v["gpt_model"],
         "director_provider": "codex",
         "director_model": v["gpt_model"],

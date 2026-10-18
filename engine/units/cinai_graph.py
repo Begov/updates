@@ -234,9 +234,6 @@ class ModelCatalog:
                 return candidate
         return None
 
-    def duration_key(self, slug: str) -> Optional[str]:
-        return "duration" if "duration" in self.settings(slug) else None
-
     def credit_multiplier(self, slug: str, setting_id: str, value: Any) -> float:
         setting = self.settings(slug).get(setting_id) or {}
         for opt in setting.get("options") or []:
@@ -246,18 +243,6 @@ class ModelCatalog:
                 except (TypeError, ValueError):
                     return 1.0
         return 1.0
-
-    def estimate_credits(self, slug: str, settings_values: Dict[str, Any]) -> float:
-        """Цена = cost_per_unit × множители выбранных опций (charge_phase=pre)."""
-        pricing = self.spec(slug).get("pricing") or {}
-        try:
-            base = float(pricing.get("cost_per_unit") or 0)
-        except (TypeError, ValueError):
-            base = 0.0
-        total = base
-        for key, value in (settings_values or {}).items():
-            total *= self.credit_multiplier(slug, key, value)
-        return round(total, 2)
 
     # -- сборка settingsValues ---------------------------------------------
 

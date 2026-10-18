@@ -178,65 +178,12 @@ PASS1_PARALLEL = int(_p1par_raw) if _p1par_raw.isdigit() and int(_p1par_raw) > 0
 # Backend режиссуры: 'gpt' (Codex CLI, по умолчанию), 'claude_code' или 'claude_api'
 DIRECTOR_BACKEND = (os.getenv('DIRECTOR_BACKEND', '') or 'gpt').strip().lower()
 
-# Director behavior profile. This is deliberately separate from STORY_MODE,
-# which belongs to VEO chain generation.
-DIRECTOR_PROFILE = (
-    os.getenv('DIRECTOR_PROFILE', '') or 'standard'
-).strip().lower()
-if DIRECTOR_PROFILE not in ('standard', 'auto_visual_story'):
-    DIRECTOR_PROFILE = 'standard'
-
-# Auto Visual Story legacy defaults.
-# Runtime profile execution uses ACTIVE_CLIP_* plus the intro range from the
-# current GUI/process snapshot. These values remain only for older callers.
-VISUAL_STORY_MIN_SCENE_DURATION = max(
-    0.1,
-    float(os.getenv(
-        'VISUAL_STORY_MIN_SCENE_DURATION',
-        os.getenv('VIDEO_CLIP_MIN_DURATION', '4'),
-    ) or 4),
-)
-VISUAL_STORY_TARGET_SCENE_DURATION = max(
-    VISUAL_STORY_MIN_SCENE_DURATION,
-    float(os.getenv(
-        'VISUAL_STORY_TARGET_SCENE_DURATION',
-        os.getenv('VIDEO_CLIP_MAX_DURATION', '8'),
-    ) or 8),
-)
-VISUAL_STORY_MAX_SCENE_DURATION = max(
-    VISUAL_STORY_TARGET_SCENE_DURATION,
-    float(os.getenv(
-        'VISUAL_STORY_MAX_SCENE_DURATION',
-        os.getenv('VIDEO_CLIP_MAX_DURATION', '8'),
-    ) or 8),
-)
-VISUAL_STORY_CONTEXT_BEFORE = max(
-    0, int(os.getenv('VISUAL_STORY_CONTEXT_BEFORE', '2') or 2)
-)
-VISUAL_STORY_CONTEXT_AFTER = max(
-    0, int(os.getenv('VISUAL_STORY_CONTEXT_AFTER', '2') or 2)
-)
-VISUAL_STORY_VISUAL_HISTORY = max(
-    0, int(os.getenv('VISUAL_STORY_VISUAL_HISTORY', '4') or 4)
-)
-VISUAL_STORY_ALLOW_REUSE = (
-    os.getenv('VISUAL_STORY_ALLOW_REUSE', 'true').strip().lower()
-    in ('1', 'true', 'yes', 'on')
-)
 # must_have ЗАМОРОЖЕН (решение 25.08): выкл. → модель его не сочиняет (токены),
 # ютуб-вижн его не получает (жёсткий список может отбраковать всех кандидатов).
 # Поле в схемах/клипах остаётся; вернуть — включить флаг.
 VISUAL_STORY_MUST_HAVE = (
     os.getenv('VISUAL_STORY_MUST_HAVE', 'false').strip().lower()
     in ('1', 'true', 'yes', 'on')
-)
-# Этап ② (сочиняет, параллельно по главам): число воркеров и потолок сцен
-# в одном чанке (длинная глава режется кодом, реестр тот же).
-VISUAL_STORY_CHAPTER_WORKERS = max(
-    1, int(os.getenv('VISUAL_STORY_CHAPTER_WORKERS', '4') or 4)
-)
-VISUAL_STORY_CHAPTER_MAX_SCENES = max(
-    1, int(os.getenv('VISUAL_STORY_CHAPTER_MAX_SCENES', '60') or 60)
 )
 # Ютуб-стадия: отсекать ролики, чья ориентация не совпадает с целевой (Shorts
 # в 16:9-проекте и наоборот). У поиска YouTube фильтра ориентации нет —
@@ -256,18 +203,6 @@ YOUTUBE_DISCOVERY_LIMIT = max(
 # (6.5 с → 2 × 3.25, не 3 + 3 + стоп-кадр 0.5 с). Решение 25.08.
 YOUTUBE_FRAGMENT_TOLERANCE_SEC = max(
     0.0, float(os.getenv('YOUTUBE_FRAGMENT_TOLERANCE_SEC', '1.0') or 1.0)
-)
-VISUAL_STORY_REQUIRE_WORD_TIMESTAMPS = (
-    os.getenv('VISUAL_STORY_REQUIRE_WORD_TIMESTAMPS', 'true').strip().lower()
-    in ('1', 'true', 'yes', 'on')
-)
-VISUAL_STORY_FALLBACK = (
-    os.getenv('VISUAL_STORY_FALLBACK', 'archive') or 'archive'
-).strip().lower()
-if VISUAL_STORY_FALLBACK not in ('stop', 'reuse_previous', 'archive', 'ai'):
-    VISUAL_STORY_FALLBACK = 'archive'
-VISUAL_STORY_EPF_TIMEOUT = max(
-    30, int(os.getenv('VISUAL_STORY_EPF_TIMEOUT', '180') or 180)
 )
 
 # Путь к Codex CLI exe (auto-detect per platform)

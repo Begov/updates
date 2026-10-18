@@ -60,29 +60,20 @@ def _codex_transport_failed(output: str) -> bool:
 
 
 _CODEX_STAGE_NAMES = {
-    'visual_story_scene_plan': 'план сцен',
-    'visual_story_chapter_plan': 'сочинение главы',
     'pass1_control': 'монтажный план (Pass 1)',
     'pass2_control': 'промптаж (Pass 2)',
 }
 
-# Этапы Auto Visual Story на Codex идут файловым контрактом (25.08): схема у
-# всех одна — контрольная, а фаза зашита в имя рабочей папки `codex_<phase>`.
-_VISUAL_STORY_PHASE_NAMES = {
-    'scene_plan': 'план сцен',
-    'chapter': 'сочинение главы',
-}
 
-
-def _visual_story_phase_label(work_dir_name: str) -> str:
+def _file_control_phase_label(work_dir_name: str) -> str:
+    """Вызовы по контрольной схеме (file_control): фаза зашита в имя рабочей папки `codex_<phase>`."""
     phase = work_dir_name[len('codex_'):] if work_dir_name.startswith('codex_') else work_dir_name
     repair = phase.endswith('_repair')
     if repair:
         phase = phase[:-len('_repair')]
     parts = phase.split('_')
     numbers = [int(chunk) for chunk in parts if chunk.isdigit()]
-    words = [chunk for chunk in parts if not chunk.isdigit()]
-    name = _VISUAL_STORY_PHASE_NAMES.get('_'.join(words), phase)
+    name = '_'.join(chunk for chunk in parts if not chunk.isdigit()) or phase
     if numbers:
         name = f'{name}, чанк {numbers[0]}'
     return f'{name} (повтор)' if repair else name
@@ -97,11 +88,9 @@ def _codex_stage_label(schema_file: str, result_file) -> str:
     фазе (visual_queries_003_result.json).
     """
     base = str(schema_file).replace('.json', '')
-    if base == 'visual_story_file_control':
-        return _visual_story_phase_label(Path(str(result_file)).parent.name)
-    name = (_CODEX_STAGE_NAMES.get(base)
-            or _CODEX_STAGE_NAMES.get(base.replace('visual_story_', ''))
-            or base)
+    if base == 'file_control':
+        return _file_control_phase_label(Path(str(result_file)).parent.name)
+    name = _CODEX_STAGE_NAMES.get(base) or base
     # Номера берём ТОЛЬКО из отдельных числовых кусков имени: иначе «pass1»
     # превращался бы в «пачку 1». Имя фазы поисковых планов несёт и общее
     # число пачек (visual_queries_006_of_019) — показываем «6 из 19», чтобы
@@ -266,17 +255,6 @@ def _build_chain_chunks(clips: list, chunk_size: int) -> list:
     if current:
         chunks.append(current)
     return chunks
-
-
-def resolve_pass2_chunk_size(chunk_size: Any, *, minimum: int = 5) -> int:
-    """Normalize the Pass 2 chunk setting; zero explicitly disables chunking."""
-    try:
-        value = int(chunk_size or 0)
-    except (TypeError, ValueError):
-        value = 0
-    if value <= 0:
-        return 0
-    return max(minimum, value)
 
 
 def _build_chain_hint() -> str:
@@ -2567,19 +2545,3 @@ Write the JSON file and then report your status in your final response."""
 # Wrapper function — аналог direct_project() для GptDirector
 # =========================================================================
 
-def gpt_direct_project(
-    transcription_path: str,
-    style_guide_path: str,
-    output_dir: str,
-    project_name: str = "Untitled",
-    model_name: Optional[str] = None,
-    two_pass: bool = False,
-    prompts_only: bool = False,
-    resume_path: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Wrapper: создаёт GptDirector и запускает analyze()."""
-    director = GptDirector(model_name=model_name)
-    return director.analyze(
-        transcription_path, style_guide_path, output_dir, project_name,
-        two_pass=two_pass, prompts_only=prompts_only, resume_path=resume_path,
-    )

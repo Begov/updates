@@ -589,20 +589,6 @@ class AssemblyAITranscriber:
 
         return result
     
-    def get_status(self, transcript_id: str) -> aai.Transcript:
-        """
-        Получение статуса транскрипции по ID
-        
-        Args:
-            transcript_id: ID транскрипции
-            
-        Returns:
-            Объект транскрипции
-        """
-        transcriber = aai.Transcriber()
-        return transcriber.get_transcript(transcript_id)
-
-
 def transcribe_audio(
     audio_path: str,
     output_path: str,

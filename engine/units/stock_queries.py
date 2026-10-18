@@ -480,7 +480,7 @@ def _agent_run(provider: str, task: str, out_name: str) -> str:
     work.mkdir(parents=True, exist_ok=True)
     phase = str(out_name).replace('.json', '') or 'stock_prompt'
     # Схема ОТВЕТА под формат этого промптера: без неё уходила контрольная
-    # (`visual_story_file_control`), и Codex возвращал отчёт о записи файла
+    # (`file_control`), и Codex возвращал отчёт о записи файла
     # вместо самих запросов — парсер видел «пустой/непарсимый ответ» и стадия
     # сваливалась на озвучку (прогон 26.08).
     schema = ('stock_queries.json' if 'queries' in str(out_name)

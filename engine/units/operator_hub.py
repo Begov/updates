@@ -221,7 +221,7 @@ def ask_text(
 
             runner = CodexRunner(model_name=model or None, timeout=timeout)
             # Codex работает по схеме вывода: без неё он волен ответить чем угодно.
-            runner.run(task, schema_file or "visual_story_file_control.json",
+            runner.run(task, schema_file or "file_control.json",
                        result_file, work)
         if not result_file.exists():
             raise RuntimeError(f"{provider}: result file was not created")

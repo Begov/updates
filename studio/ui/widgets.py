@@ -338,23 +338,10 @@ class Segmented(QWidget):
         for key, button in self.items.items():
             button.setSelected(key == current)
 
-    def set_button_tip(self, value, text) -> None:
-        key = self._key_of(value)
-        if key:
-            set_tip(self.items[key], text)
-
     def set_button_enabled(self, value, enabled: bool) -> None:
         key = self._key_of(value)
         if key:
             self.items[key].setEnabled(enabled)
-
-    def set_button_visible(self, value, visible: bool) -> None:
-        key = self._key_of(value)
-        if key:
-            self.items[key].setVisible(visible)
-            self._flow.invalidate()
-            self._fit_height()
-            self.updateGeometry()
 
     def values(self) -> list:
         return list(self._map.values())
@@ -665,9 +652,6 @@ class Card(QFrame):
             self.set_collapsed(self.body.isVisible())
             return True
         return super().eventFilter(obj, event)
-
-    def is_collapsed(self) -> bool:
-        return not self.body.isVisible()
 
     def set_collapsed(self, collapsed: bool, save: bool = True) -> None:
         self.body.setVisible(not collapsed)
