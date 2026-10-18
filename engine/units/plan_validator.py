@@ -466,32 +466,3 @@ def _validate_chain_ids(clips: list) -> List[str]:
     return errors
 
 
-if __name__ == '__main__':
-    # Тест валидации
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Использование: python validator.py <json_file>")
-        sys.exit(1)
-    
-    file_path = sys.argv[1]
-    
-    is_valid, data, msg = validate_json_file(file_path)
-    print(msg)
-    
-    if is_valid:
-        if 'audioDuration' in data:
-            # Это transcription.json
-            valid, errors = validate_transcription_json(data)
-        elif 'clips' in data:
-            # Это montage_plan.json
-            valid, errors = validate_montage_plan_json(data, data.get('audioDuration', 0))
-        else:
-            valid, errors = True, []
-        
-        if valid:
-            print("✅ Валидация пройдена")
-        else:
-            print("❌ Ошибки валидации:")
-            for error in errors:
-                print(f"   • {error}")

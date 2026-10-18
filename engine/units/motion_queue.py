@@ -201,13 +201,6 @@ def close_all(*, wait: bool = True) -> None:
             logger.warning("VideoQueue: закрытие не удалось: %s", exc)
 
 
-def hold_all(reason: str = '') -> None:
-    with _registry_lock:
-        queues = list(_registry.values())
-    for queue in queues:
-        queue.hold(reason)
-
-
 def release_all(reason: str = '') -> None:
     with _registry_lock:
         queues = list(_registry.values())

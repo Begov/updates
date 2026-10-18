@@ -5,7 +5,7 @@ import html
 import re
 import time
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QTextCharFormat, QTextCursor
@@ -139,26 +139,6 @@ def hline() -> QFrame:
     line.setObjectName("Divider")
     line.setFrameShape(QFrame.NoFrame)
     return line
-
-
-def hbox(*widgets, spacing: int = 8, margins=(0, 0, 0, 0), stretch_end: bool = False) -> QHBoxLayout:
-    lay = QHBoxLayout()
-    lay.setSpacing(spacing)
-    lay.setContentsMargins(*margins)
-    for w in widgets:
-        if w is None:
-            continue
-        if isinstance(w, int):
-            lay.addSpacing(w)
-        elif w == "stretch":
-            lay.addStretch(1)
-        elif isinstance(w, QWidget):
-            lay.addWidget(w)
-        else:
-            lay.addLayout(w)
-    if stretch_end:
-        lay.addStretch(1)
-    return lay
 
 
 class Chip(QLabel):
@@ -875,41 +855,3 @@ class LogView(QWidget):
             Path(target).write_text(self.text(), encoding="utf-8")
 
 
-class ElidedLabel(QLabel):
-    """Подпись, которая сокращается многоточием, если не влезает."""
-
-    def __init__(self, text: str = "", parent=None):
-        super().__init__(parent)
-        self._full = text
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.setText(text)
-
-    def setText(self, text: str) -> None:  # noqa: N802 (Qt API)
-        self._full = text or ""
-        self._update()
-
-    def resizeEvent(self, event):  # noqa: N802
-        super().resizeEvent(event)
-        self._update()
-
-    def _update(self) -> None:
-        metrics = self.fontMetrics()
-        super().setText(metrics.elidedText(self._full, Qt.ElideMiddle, max(20, self.width())))
-        self.setToolTip(self._full)
-
-
-def fill_combo(combo, items: Iterable, current=None) -> None:
-    """Заполнить комбобокс парами (значение, подпись) и выбрать текущее."""
-    combo.blockSignals(True)
-    combo.clear()
-    for item in items:
-        if isinstance(item, tuple):
-            value, text = item[0], item[1]
-        else:
-            value, text = item, item
-        combo.addItem(tr(text), value)
-    if current is not None:
-        idx = combo.findData(current)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-    combo.blockSignals(False)

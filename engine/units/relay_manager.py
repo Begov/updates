@@ -52,17 +52,6 @@ def _curl_ip(proxy_arg: str, timeout: int) -> tuple[bool, str]:
         return False, str(e)
 
 
-def proxy_to_url(raw: str, default_scheme: str = "socks5") -> str:
-    """МГНОВЕННО (без сети) → URL со схемой. Со схемой — как есть. Формат антика
-    host:port:user:pass → default_scheme://user:pass@host:port. Для сохранения/использования."""
-    s = (raw or "").strip()
-    if not s:
-        return ""
-    if "://" in s:
-        return s
-    return f"{default_scheme}://{normalize_proxy(s)}"
-
-
 def apply_proxy_scheme(raw: str, scheme: str) -> str:
     """ПРИНУДИТЕЛЬНО навесить выбранную юзером схему (http/socks5). Единая точка сборки:
     снимает существующую схему, ставит выбранную. Тип прокси из host:port:user:pass не определить

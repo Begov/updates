@@ -316,11 +316,3 @@ def format_time_delta(seconds_until: int) -> str:
     return f'{h}h {m:02d}m'
 
 
-def format_reset_clock(reset_at_ts: int) -> str:
-    """Format reset timestamp as 'HH:MM' local time."""
-    if reset_at_ts <= 0:
-        return '?'
-    try:
-        return time.strftime('%H:%M', time.localtime(reset_at_ts))
-    except Exception:
-        return '?'

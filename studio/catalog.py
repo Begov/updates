@@ -240,13 +240,6 @@ def operator_model_to_id(provider: str, label: str) -> str:
     return (label or "").strip()
 
 
-def rewrite_label(spec: str) -> str:
-    for label, s in REWRITE_MODELS:
-        if s == spec:
-            return label
-    return REWRITE_MODELS[0][0]
-
-
 def fastgen_ratio(ratio: str) -> str:
     """Формат ролика -> ориентация картинок FastGen."""
     return "portrait" if (ratio or "").strip() == "9:16" else "landscape"

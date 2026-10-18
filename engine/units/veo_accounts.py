@@ -212,24 +212,6 @@ def format_expiration(value: Any) -> str:
         return str(value)
 
 
-def compact_text(item: dict[str, Any]) -> str:
-    name = str(item.get("name") or f"Key{item.get('slot', '?')}")[:8]
-    if not item.get("ok"):
-        status = {
-            "expired": "expired",
-            "revoked": "revoked",
-            "unauthorized": "invalid",
-            "unavailable": "offline",
-        }.get(item.get("error_kind"), "error")
-        return f"{name}: {status}"
-    remaining = item.get("image_remaining")
-    reset = format_duration(item.get("resets_in_seconds"))
-    if remaining is not None:
-        return f"{name} \U0001f34c{int(remaining):,} {reset}"
-    used = item.get("video_used")
-    return f"{name} V:{int(used or 0):,} {reset}"
-
-
 def quota_row_text(item: dict[str, Any]) -> str:
     name = str(item.get("name") or f"Key{item.get('slot', '?')}")
     if not item.get("ok"):

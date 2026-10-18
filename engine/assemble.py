@@ -756,77 +756,6 @@ def get_encoder_params(encoder_type, codec, bitrate='10M'):
                 '-maxrate', bitrate, '-bufsize', f'{int(bitrate[:-1])*2}M',
                 '-profile:v', 'high', '-pix_fmt', 'yuv420p']
 
-def create_freeze_frame(source_video, output_video, duration, encoder_type, codec, bitrate, fps=60):
-    """Создаёт freeze frame из последнего кадра источника"""
-    logger.debug(f"Создание freeze frame из {source_video} длительностью {duration:.2f} сек")
-
-    encoder_params = get_encoder_params(encoder_type, codec, bitrate)
-    temp_frame = output_video.parent / f'temp_frame_{output_video.stem}.png'
-
-    try:
-        cmd_extract = [
-            FFMPEG, '-y',
-            '-sseof', '-1',
-            '-i', str(source_video),
-            '-update', '1',
-            '-q:v', '1',
-            str(temp_frame)
-        ]
-        logger.debug(f"Извлечение последнего кадра: {' '.join(cmd_extract)}")
-        subprocess.run(cmd_extract, check=True, capture_output=True, **SUBPROCESS_FLAGS)
-
-        cmd_create = [
-            FFMPEG, '-y',
-            '-loop', '1',
-            '-i', str(temp_frame),
-            '-t', str(duration),
-            '-r', str(fps)
-        ] + encoder_params + [
-            '-an',
-            str(output_video)
-        ]
-        logger.debug(f"Создание видео из кадра: {' '.join(cmd_create)}")
-        subprocess.run(cmd_create, check=True, capture_output=True, **SUBPROCESS_FLAGS)
-
-        temp_frame.unlink()
-        logger.info(f"Freeze frame создан: {output_video}")
-    except Exception as e:
-        logger.error(f"Ошибка создания freeze frame: {e}")
-        logger.error(traceback.format_exc())
-        raise
-
-def build_atempo_chain(speed_factor):
-    """
-    Создаёт цепочку atempo фильтров для ускорения/замедления аудио.
-    FFmpeg atempo поддерживает только 0.5-2.0, для больших значений нужна цепочка.
-
-    atempo=2.0 → аудио в 2 раза быстрее (длительность /2)
-    atempo=0.5 → аудио в 2 раза медленнее (длительность *2)
-
-    speed_factor — во сколько раз нужно ускорить (>1 = быстрее, <1 = медленнее).
-    atempo = speed_factor напрямую (НЕ 1/speed_factor!)
-    """
-    target_atempo = speed_factor  # БЕЗ инверсии!
-
-    if 0.5 <= target_atempo <= 2.0:
-        return f'atempo={target_atempo:.5f}'
-
-    chain = []
-    current = target_atempo
-
-    if current > 2.0:
-        while current > 2.0:
-            chain.append('atempo=2.0')
-            current /= 2.0
-        chain.append(f'atempo={current:.5f}')
-    elif current < 0.5:
-        while current < 0.5:
-            chain.append('atempo=0.5')
-            current *= 2.0
-        chain.append(f'atempo={current:.5f}')
-
-    return ','.join(chain)
-
 _IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif'}
 _STILL_EXPECTED_FORMATS = {
     '.png': {'PNG'},
@@ -2297,55 +2226,6 @@ def group_concat(file_list, output_file, temp_dir, group_size=9999, sub_path=Non
     print(f"      💾 Размер: {final_size:.0f} MB")
     print(f"      ⏱️  Время: {elapsed/60:.1f} мин")
     print()
-
-def run_ffmpeg_with_progress_by_files(cmd, total_files, description="Склейка"):
-    """
-    Запускает FFmpeg с прогресс-баром по количеству файлов.
-    Используется для склейки через concat demuxer.
-    """
-    logger.debug(f"Запуск FFmpeg с прогресс-баром по файлам: {description}")
-
-    cmd_with_progress = cmd + ['-progress', 'pipe:1']
-    process = subprocess.Popen(cmd_with_progress, stdout=subprocess.PIPE,
-                              stderr=subprocess.DEVNULL, universal_newlines=True, encoding='utf-8', errors='replace',
-                              **SUBPROCESS_FLAGS)
-
-    start_time = time.time()
-    last_refresh = time.time()
-
-    # Прогресс-бар по количеству файлов
-    with tqdm(total=total_files, desc=description, unit="файл",
-              bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]') as pbar:
-        last_update = start_time
-
-        for line in process.stdout:
-            line = line.strip()
-
-            # При склейке ffmpeg не отдаёт точный прогресс,
-            # поэтому обновляем плавно по времени
-            now = time.time()
-            if now - last_update >= 0.2:
-                # Эмулируем прогресс по elapsed времени
-                elapsed = now - start_time
-                # Предполагаем линейную скорость: total_files / estimated_total
-                # Но так как не знаем общую длительность, просто пульсим прогресс
-                pbar.update(0)  # Обновление без изменения прогресса
-                last_update = now
-
-            now = time.time()
-            if now - last_refresh >= 1.0:
-                pbar.refresh()
-                last_refresh = now
-
-    process.wait()
-
-    elapsed = time.time() - start_time
-    logger.info(f"{description} завершена за {elapsed:.1f}с")
-
-    if process.returncode != 0:
-        logger.error(f"FFmpeg завершился с ошибкой: returncode={process.returncode}")
-        raise subprocess.CalledProcessError(process.returncode, cmd)
-
 
 def run_ffmpeg_with_spinner(cmd, description="Обработка"):
     """

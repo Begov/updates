@@ -91,21 +91,3 @@ def direct_project(
     )
 
 
-if __name__ == '__main__':
-    import sys
-
-    if len(sys.argv) < 3:
-        print("Использование: python director.py <transcription.json> <style_guide.txt> [output_dir] [project_name] [--two-pass]")
-        sys.exit(1)
-
-    transcription_file = sys.argv[1]
-    style_guide_file = sys.argv[2]
-    output_directory = sys.argv[3] if len(sys.argv) > 3 else 'output'
-    project_name = sys.argv[4] if len(sys.argv) > 4 else 'Untitled'
-    two_pass = '--two-pass' in sys.argv
-
-    results = direct_project(transcription_file, style_guide_file, output_directory, project_name, two_pass=two_pass)
-
-    print(f"\n✅ Создано файлов: {len(results)}")
-    for name, path in results.items():
-        print(f"   • {name}: {path}")

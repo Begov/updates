@@ -15,7 +15,6 @@
 - Используем только prompts.txt который создаётся в первом этапе
 """
 import re
-import sys
 import os
 from pathlib import Path
 
@@ -199,25 +198,3 @@ def remap_dense_prompts_for_montage(prompts: dict, clips: list) -> tuple:
     return prompts, False
 
 
-if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Использование:")
-        print("  python prompt_extract.py <fragment_id>     - извлечь промпт для фрагмента")
-        print("  python prompt_extract.py --all             - извлечь все промпты")
-        sys.exit(1)
-
-    if sys.argv[1] == '--all':
-        prompts = extract_all_prompts()
-        for fragment_id, prompt in sorted(prompts.items()):
-            print(f"\n{'='*80}")
-            print(f"ФРАГМЕНТ #{fragment_id}")
-            print(f"{'='*80}\n")
-            print(prompt)
-    else:
-        try:
-            fragment_id = int(sys.argv[1])
-            prompt = extract_prompt(fragment_id)
-            print(prompt)
-        except ValueError:
-            print(f"❌ Ошибка: '{sys.argv[1]}' не является числом")
-            sys.exit(1)

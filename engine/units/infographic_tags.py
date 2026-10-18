@@ -134,19 +134,3 @@ def default_infographic_style() -> str:
     )
 
 
-def infographic_pass2_directive() -> str:
-    """Inline rule for legacy script Pass 2 prompts."""
-    return f"""
-
-INFOGRAPHIC RULE:
-- A clip marked `source: "infographic"` is a STATIC information graphic, not a film shot.
-- Turn its voiceover into one useful diagram, timeline, chart, map, comparison, labelled process, or data composition.
-- Use an explicit infographic section from the style guide when present; otherwise
-  keep the style guide's own visual language and use this default only as a
-  legibility skeleton:
-  {default_infographic_style()}
-{infographic_style_anchor_rule()}
-{infographic_language_rule()}
-- No camera angle, actors, cinematic action, motion, lens language, 3D render, or tiny unreadable text.
-- Do not append the normal continuous-camera ending for infographic clips.
-"""

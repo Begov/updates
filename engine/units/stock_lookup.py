@@ -161,17 +161,6 @@ def down_sources() -> Dict[str, str]:
         return dict(_source_down)
 
 
-def reset_key_state() -> None:
-    """Сброс состояния ключей (новый прогон в том же процессе)."""
-    with _key_lock:
-        _key_state.clear()
-        _key_disabled.clear()
-        _key_invalid.clear()
-        _source_down.clear()
-        _down_announced.clear()
-    _pexels_live.update(key='', tried=False)
-
-
 def _all_keys(provider: str) -> List[str]:
     """PEXELS_API_KEY, PEXELS_API_KEY_2, _3, … _8 — пул ключей провайдера.
 
@@ -356,13 +345,6 @@ def _http_json_once(url: str, headers: Optional[Dict[str, str]] = None,
     except Exception as exc:                               # noqa: BLE001
         logger.warning("%s: запрос упал: %s: %s", provider or 'stock', type(exc).__name__, exc)
         return None, False, 0.0
-
-
-def _http_json(url: str, headers: Optional[Dict[str, str]] = None,
-               provider: str = '', timeout: int = 30) -> Optional[Dict[str, Any]]:
-    """Совместимость: один запрос без повторов."""
-    data, _, _ = _http_json_once(url, headers, provider=provider, timeout=timeout)
-    return data
 
 
 def _request_json(url_fn, provider: str = '', *, headers_fn=None,

@@ -262,25 +262,6 @@ def import_browser_session(min_seconds_left: int = 300) -> Dict[str, object]:
             'has_refresh': bool(session.get('refresh_token'))}
 
 
-def wait_for_browser_session(timeout: int = 300, poll: float = 3.0,
-                             on_status=None) -> Dict[str, object]:
-    """Ждать, пока пользователь войдёт в браузере, и забрать сессию.
-
-    Опрашиваем хранилища браузеров, пока не появится принятый сервером токен."""
-    report = on_status or (lambda _text: None)
-    deadline = time.time() + max(10, timeout)
-    last_error = 'сессия не найдена'
-    while time.time() < deadline:
-        try:
-            return import_browser_session()
-        except CinAIAuthError as exc:
-            last_error = str(exc)
-        left = int(deadline - time.time())
-        report(f'Жду вход в браузере… ({left} с)')
-        time.sleep(poll)
-    raise CinAIAuthError(f'Вход не дождались: {last_error}')
-
-
 def ensure_fresh_token(min_hours: Optional[float] = None,
                        on_status=None) -> Optional[Dict[str, object]]:
     """Превентивное продление пары токенов (для фонового вызова из GUI).

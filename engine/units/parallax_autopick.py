@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -11,53 +10,6 @@ from units.source_ledger import AUTO_VISUAL_PARALLAX_PHOTO_SOURCES
 
 
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
-
-
-def ready_auto_visual_photo_ids(project_dir: str | Path,
-                                sources=None,
-                                include_ai: bool = False) -> list[int]:
-    """Return ordered ready photo IDs, excluding all video sources.
-
-    ``sources`` — какие источники брать. По умолчанию набор Auto Visual Story
-    (Real Photo + сток), в стандартном режиме сюда приходит выбор пользователя
-    галками рядом с параллаксом.
-    ``include_ai`` — добавить нейрокадры (галка «AI»). Включается только когда
-    видеогенерация выключена: при работающем i2v те же кадры оживляет обычная
-    стадия, и второй проход отправил бы их повторно.
-    """
-    from units.source_ledger import VIDEO_SKIP_SOURCES
-
-    allowed = set(sources) if sources is not None else set(
-        AUTO_VISUAL_PARALLAX_PHOTO_SOURCES)
-    # Учитываем и НАМЕРЕНИЕ режиссёра, а не только закрытые клипы: пока стадия
-    # качает, у клипа промежуточный маркер (`stock_pending`), а если материал не
-    # нашёлся — маркер вовсе снимут. Считая только по готовым, мы бы получали
-    # каждый круг новый список, и «каждый N-й» ездил бы по ролику.
-    if 'stock_photo' in allowed:
-        allowed.add('stock_pending')
-    if 'real_photo' in allowed:
-        allowed.add('real_photo_pending')
-    project = Path(project_dir)
-    plan_path = project / "montage_plan.json"
-    raw = json.loads(plan_path.read_text(encoding="utf-8-sig"))
-    plan = raw.get("montage_plan", raw)
-    generated = project / "generated"
-    result: list[int] = []
-    for clip in plan.get("clips", []):
-        source = clip.get("source")
-        if include_ai and source not in VIDEO_SKIP_SOURCES:
-            # Нейрокадр: внешнего маркера нет, материал — картинка в
-            # generated/. Берём его ТОЛЬКО когда видеогенерация выключена: при
-            # включённом i2v его оживит обычная стадия, и параллакс-промпт
-            # подставит она сама — иначе кадр ушёл бы в работу дважды.
-            pass
-        elif source not in allowed:
-            continue
-        try:
-            result.append(int(clip["id"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-    return result
 
 
 def photo_ready_for_parallax(project_dir: str | Path, clip_id: int) -> bool:

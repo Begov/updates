@@ -162,20 +162,3 @@ def use_parallax_for_clip(
     return int(clip_id) % every_n == 0
 
 
-def select_every_n_clip_ids(clip_ids, every_n: int) -> list[int]:
-    """Select every Nth clip from an already ordered eligible-image list."""
-    try:
-        every_n = max(1, int(every_n))
-    except (TypeError, ValueError):
-        every_n = 2
-    ids = []
-    for clip_id in clip_ids:
-        try:
-            ids.append(int(clip_id))
-        except (TypeError, ValueError):
-            continue
-    return [
-        clip_id
-        for ordinal, clip_id in enumerate(ids, start=1)
-        if ordinal % every_n == 0
-    ]

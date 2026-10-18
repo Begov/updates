@@ -565,13 +565,3 @@ def setup_project(audio_file: Path, ready_dir: Path, projects_dir: Path, concat_
     return project_info
 
 
-if __name__ == '__main__':
-    # Тест
-    ready_dir = Path('../pipeline_queue')
-    projects_dir = Path('../projects')
-    concat_script = Path('../assemble.py')
-    
-    files = get_ready_files(ready_dir)
-    print(f"Найдено файлов в pipeline_queue: {len(files)}")
-    for f in files:
-        print(f"  - {f.name}")

@@ -1149,9 +1149,6 @@ FASTGEN_POLL_INTERVAL = 8
 # Таймаут ожидания одной генерации (секунды)
 FASTGEN_POLL_TIMEOUT = 300
 
-# Количество повторных попыток при ошибках
-FASTGEN_MAX_RETRIES = 3
-
 # Предполётная проверка рефов: тест до начала генерации (True = включена)
 FASTGEN_PREFLIGHT_REFS = os.getenv('FASTGEN_PREFLIGHT_REFS', 'true').lower() in ('true', '1', 'yes')
 
@@ -1365,9 +1362,6 @@ VEONONSTOP_VIDEO_UPSCALE = os.getenv('VEONONSTOP_VIDEO_UPSCALE', '').lower() in 
 # ============================================================================
 # НАСТРОЙКИ ВИДЕО
 # ============================================================================
-
-# Длительность одного фрагмента (секунды)
-VIDEO_FRAGMENT_DURATION = 8.0
 
 # FPS для финального видео
 VIDEO_FPS = 60
@@ -1987,8 +1981,3 @@ CHAIN_MAX_SAME_CLIP_FAILS = int(os.getenv('CHAIN_MAX_SAME_CLIP_FAILS', '3'))
 # СОЗДАНИЕ ДИРЕКТОРИЙ
 # ============================================================================
 
-def create_directories():
-    """Создаёт необходимые директории"""
-    TEMP_DIR.mkdir(exist_ok=True)
-    LOGS_DIR.mkdir(exist_ok=True)
-    PROMPTS_DIR.mkdir(exist_ok=True)

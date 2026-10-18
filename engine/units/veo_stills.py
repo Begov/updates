@@ -1995,39 +1995,3 @@ def generate_all_images(
 # CLI
 # ======================================================================
 
-if __name__ == '__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser(description='VeoNonStop image generation (Imagen/Banana)')
-    parser.add_argument('--dir', required=True, help='Project directory')
-    parser.add_argument('--mode', choices=['imagen', 'banana', 'banana_ref'], default='imagen')
-    parser.add_argument('--parallel', type=int, default=None)
-    parser.add_argument('--ratio', default=None, help='Aspect ratio (16:9, 9:16, 1:1)')
-    parser.add_argument('--ids', default=None, help='Comma-separated clip IDs')
-    parser.add_argument('--ref-dir', default=None, help='Style reference images directory')
-    parser.add_argument('--silent', action='store_true', help='Silent mode: auto-retry + FastGen fallback')
-
-    args = parser.parse_args()
-
-    clip_ids = None
-    if args.ids:
-        clip_ids = [int(x.strip()) for x in args.ids.split(',')]
-
-    logging.basicConfig(level=logging.DEBUG, format=config.LOG_FORMAT)
-
-    try:
-        result = generate_all_images(
-            project_dir=args.dir,
-            mode=args.mode,
-            max_parallel=args.parallel,
-            clip_ids=clip_ids,
-            aspect_ratio=args.ratio,
-            ref_dir=args.ref_dir,
-            silent=args.silent,
-        )
-        sys.exit(0 if result['failed'] == 0 else 1)
-    except Exception as e:
-        print(f"\n  {_RED}ERROR:{_RESET} {e}")
-        logging.exception("imggen failed")
-        sys.exit(1)
-

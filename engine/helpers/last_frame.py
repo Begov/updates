@@ -7,18 +7,13 @@ montage_plan.json and extracts the frame at the montage cut point. That keeps
 the next extend clip aligned with the exact point assemble.py will later
 trim to, without doing any extra video trim during generation.
 
-CLI usage:
-    python last_frame.py <input_mp4> <output_png> [--offset 0.5]
-
-API usage:
+Usage:
     from helpers.last_frame import get_last_frame_path
     path = get_last_frame_path(project_dir, clip_id)
 """
 
-import argparse
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -272,27 +267,3 @@ def get_last_frame_path(
     return None
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Extract last/seam frame from mp4')
-    parser.add_argument('input', type=str, help='Input mp4 file')
-    parser.add_argument('output', type=str, help='Output PNG file')
-    parser.add_argument('--offset', type=float, default=0.5,
-                        help='Seconds from raw end if no --seek-time is provided')
-    parser.add_argument('--seek-time', type=float, default=None,
-                        help='Absolute source timestamp to extract')
-    parser.add_argument('--force', action='store_true',
-                        help='Force re-extract even if output exists')
-    args = parser.parse_args()
-
-    ok = extract_last_frame(
-        Path(args.input),
-        Path(args.output),
-        offset=args.offset,
-        seek_time=args.seek_time,
-        force=args.force,
-    )
-    sys.exit(0 if ok else 1)
-
-
-if __name__ == '__main__':
-    main()

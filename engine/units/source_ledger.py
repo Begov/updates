@@ -247,16 +247,6 @@ def final_marker_for(project_dir, clip, stage: str) -> str | None:
     return finals[0] if is_video else finals[1]
 
 
-def is_external(source: str | None) -> bool:
-    """True, если клип обслуживает внешняя стадия и генератор должен его пропустить."""
-    return bool(source) and source in EXTERNAL_SOURCES
-
-
-def is_video_skipped(source: str | None) -> bool:
-    """True when a clip has a still/external source and must not reach VideoGen."""
-    return bool(source) and source in VIDEO_SKIP_SOURCES
-
-
 def materialize_static_images(project_dir, sources=INFOGRAPHIC_SOURCES, printer=print) -> list[int]:
     """Copy generated stills for static sources into ``vid_img/``.
 

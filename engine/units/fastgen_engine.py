@@ -1877,11 +1877,6 @@ class ContentPolicyError(Exception):
     pass
 
 
-class ProminentPersonPromptError(ContentPolicyError):
-    """Цензура из-за упоминания известной личности по имени в тексте промпта"""
-    pass
-
-
 class ReferenceBlockedError(Exception):
     """Генерация отклонена из-за референсных изображений (лица известных людей и т.п.)"""
     pass

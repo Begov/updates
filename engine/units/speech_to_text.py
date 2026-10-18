@@ -693,17 +693,3 @@ def transcribe_audio(
     return result
 
 
-if __name__ == '__main__':
-    # Тестовый запуск
-    import sys
-    
-    if len(sys.argv) < 2:
-        print("Использование: python transcriber.py <audio_file> [output_json]")
-        sys.exit(1)
-    
-    audio_file = sys.argv[1]
-    output_file = sys.argv[2] if len(sys.argv) > 2 else 'transcription.json'
-    
-    result = transcribe_audio(audio_file, output_file)
-    print(f"\n✅ Транскрибировано {len(result['transcription'])} фрагментов")
-    print(f"   Длительность аудио: {result['audioDuration']:.2f} сек")
