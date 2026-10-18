@@ -63,23 +63,9 @@ from units.fastgen_engine import generate_all_images
 from units.veo_motion import generate_all_videos as veo_generate_all_videos
 from units.veo_stills import generate_all_images as veo_generate_all_images
 from units.cinai_stills import generate_all_images as cinai_generate_all_images
-from units.cinai_motion import (
-    generate_all_videos as cinai_generate_all_videos,
-    merge_video_outputs as cinai_merge_video_outputs,
-)
+from units.cinai_motion import generate_all_videos as cinai_generate_all_videos
 from units.ref_shrink import compress_refs
-from units.motion_modes import (
-    INTRO_I2V_T2V_MODE,
-    split_intro_i2v_t2v_clip_ids,
-)
 
-
-POST_ACTION_ALIASES = {
-    # Legacy names from the mistaken CinAI composite route. CinAI is an
-    # ImageGen provider; VeoNonStop remains the video stage.
-    "cinai_i2v": "veo_i2v",
-    "cinai_veo_i2v": "veo_i2v",
-}
 
 POST_ACTION_CHOICES = [
     "skip",
@@ -88,17 +74,7 @@ POST_ACTION_CHOICES = [
     "cinai",
     "fastgen_i2v",
     "veo_i2v",
-    "both_i2v",
-    INTRO_I2V_T2V_MODE,
     "t2v",
-    "i2v",
-    "first_last",
-    "reference",
-    "components",
-    "cinai_components",
-    "fastgen_ultra_t2v",
-    "fastgen_ultra_ingredients",
-    "fastgen_ultra_i2v",
 ]
 
 
@@ -108,11 +84,6 @@ def _engine_script(name: str) -> Path:
     if not path.exists() and path.with_suffix('.pyc').exists():
         return path.with_suffix('.pyc')
     return path
-
-
-def _parse_post_action(value: str) -> str:
-    """Normalize legacy composite-route names before argparse validation."""
-    return POST_ACTION_ALIASES.get(value, value)
 
 
 # ============================================================================
@@ -229,17 +200,12 @@ def _start_inflight_watcher(p_dir: str, video_key_slot: str, video_parallel: int
                             fastgen_key_slot: str = None,
                             output_dir_name: str = 'vid_img'):
     """Launch watch_i2v*.py as background subprocess for inflight i2v mode.
-    Engine routing: BEGO_VIDEO_ENGINE=fastgen_ultra → live_flow.py,
-    else live_veo.py (VeoNonStop). Returns Popen handle or None on failure."""
+    Engine routing: BEGO_VIDEO_ENGINE=cinai → live_cinai.py, else live_veo.py (VeoNonStop). Returns Popen handle or None on failure."""
     import subprocess as _sp
     _engine = os.environ.get('BEGO_VIDEO_ENGINE', 'veononstop').strip().lower()
     if _engine == 'cinai':
         watch_script = _engine_script('live_cinai.py')
         _script_label = 'live_cinai.py'
-    elif _engine == 'fastgen_ultra':
-        watch_script = _engine_script('live_flow.py')
-        # Flow Ultra uses existing FastGen key slot from pipeline settings.
-        _script_label = 'live_flow.py'
     else:
         watch_script = _engine_script('live_veo.py')
         _script_label = 'live_veo.py'
@@ -273,9 +239,6 @@ def _start_inflight_watcher(p_dir: str, video_key_slot: str, video_parallel: int
             '--done-file', str(project_path / 'generated' / '.imagegen_done'),
             '--drain-seconds', str(getattr(config, 'CINAI_VIDEO_INFLIGHT_DRAIN_SECONDS', 120)),
         ]
-    # FU end-image: generated/ of next clip (pair mode)
-    if _engine == 'fastgen_ultra' and os.environ.get('BEGO_FU_END_IMAGE') == '1':
-        cmd += ['--end-image-dir', str(project_path / 'generated')]
     cmd.append('--no-cancel')  # imggen runs in parallel — don't cancel its tasks
     if _engine == 'cinai':
         cmd = [item for item in cmd if item != '--no-cancel']
@@ -1403,14 +1366,10 @@ def _run_post_pipeline_silent(
         finally:
             _adapt_event.set()
 
-    action = POST_ACTION_ALIASES.get(action, action)
 
     _should_adapt = (use_codex_adapt
                      and prompt_mode == 'perclip'
-                     and action in (
-                         'fastgen_i2v', 'veo_i2v',
-                         'both_i2v', INTRO_I2V_T2V_MODE,
-                     ))
+                     and action in ('fastgen_i2v', 'veo_i2v'))
     if _should_adapt:
         _th.Thread(target=_run_adapt, daemon=True, name='codex-adapt').start()
         print("  [codex-adapt] VEO prompt adaptation started in background")
@@ -1437,28 +1396,6 @@ def _run_post_pipeline_silent(
               f"{len(animated)}/{len(clips)} clips → i2v")
         return animated
 
-    def _get_intro_i2v_t2v_clip_ids() -> tuple[list[int], list[int]]:
-        """Split the montage at the configured intro boundary for hybrid video."""
-        import json as _json
-        plan_path = Path(project_dir) / 'montage_plan.json'
-        if not plan_path.exists():
-            return [], []
-        try:
-            data = _json.loads(plan_path.read_text(encoding='utf-8-sig'))
-            plan = data.get('montage_plan', data)
-            clips = plan.get('clips', [])
-        except Exception as exc:
-            print(f"  [Intro I2V + T2V] Could not read montage plan: {exc}")
-            return [], []
-        intro_ids, t2v_ids = split_intro_i2v_t2v_clip_ids(
-            clips, config.INTRO_BLOCK_DURATION)
-        print(
-            f"  [Intro I2V + T2V] intro={config.INTRO_BLOCK_DURATION}s: "
-            f"{len(intro_ids)} clip(s) -> ImageGen + I2V, "
-            f"{len(t2v_ids)} clip(s) -> T2V"
-        )
-        return intro_ids, t2v_ids
-
     def _vislide_copy_static(animated_ids: list, output_dir_name: str = 'vid_img'):
         """Копирует картинки не-анимируемых клипов из generated/ → vid_img/ как статик-фолбек."""
         from units.vislide import copy_static
@@ -1480,10 +1417,6 @@ def _run_post_pipeline_silent(
     # стояло определение, поэтому вотчер не стартовал ни разу с 28.08 —
     # в логе значилось безобидное «[Параллакс] не стартовал: cannot access
     # local variable» (лог пользователя 29.08).
-
-    def _flowultra_parallel() -> int:
-        # Flow Ultra has its own worker budget; do not inherit Veo multi-key total.
-        return 24
 
     def _count_generated_images() -> int:
         gen_dir = Path(project_dir) / 'generated'
@@ -1766,98 +1699,6 @@ def _run_post_pipeline_silent(
                 return text
         return 'default'
 
-    def _start_inflight_watcher_for_engine(engine: str, *, prompts_file_path: str = None):
-        old_engine = os.environ.get('BEGO_VIDEO_ENGINE')
-        try:
-            os.environ['BEGO_VIDEO_ENGINE'] = engine
-            # Flow Ultra is pinned to FastGen Key1 in the current implementation;
-            # VeoNonStop keeps the selected Veo key slot.
-            key_slot = '1' if engine == 'fastgen_ultra' else video_key_slot
-            engine_parallel = _flowultra_parallel() if engine == 'fastgen_ultra' else video_parallel
-            return _start_inflight_watcher(
-                p_dir, key_slot, engine_parallel, ar, prompt_mode,
-                vislide_interval=vislide_interval,
-                prompts_file_path=prompts_file_path,
-                output_dir_name='vid_img_cinai' if engine == 'cinai' else 'vid_img',
-            )
-        finally:
-            if old_engine is None:
-                os.environ.pop('BEGO_VIDEO_ENGINE', None)
-            else:
-                os.environ['BEGO_VIDEO_ENGINE'] = old_engine
-
-    def _run_parallel_i2v_providers(prompts_file_path: str = None) -> dict:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        from units.flow_ultra_engine import generate_all_videos_flow_ultra
-
-        _vislide_ids = _get_vislide_clip_ids() if vislide_interval >= 2 else None
-        single_prompt = _video_single_prompt()
-        jobs = {}
-
-        def _run_veo_provider():
-            if not _has_any_veo_key():
-                print("  [BOTH] VeoNonStop skipped: no VEONONSTOP keys configured")
-                return {'generated': 0, 'failed': 0, 'results': []}
-            print("  [BOTH] Starting VeoNonStop i2v...")
-            return veo_generate_all_videos(
-                project_dir=p_dir, mode='i2v',
-                max_parallel=video_parallel, aspect_ratio=ar,
-                single_prompt=single_prompt,
-                active_keys=_resolve_veo_key(video_key_slot),
-                clip_ids=_vislide_ids,
-                silent=True,
-                no_cancel=True,
-                prompts_file_path=prompts_file_path,
-            )
-
-        def _run_flowultra_provider():
-            if not getattr(config, 'FASTGEN_API_KEY', ''):
-                print("  [BOTH] Flow Ultra skipped: FASTGEN_API_KEY not configured")
-                return {'generated': 0, 'failed': 0, 'results': []}
-            _requested_fu_slot = str(os.environ.get('BEGO_FU_KEY_SLOT', '1') or '1').lower()
-            if _requested_fu_slot not in ('1', 'key1', 'main'):
-                print(f"  [BOTH] Flow Ultra supports only FastGen Key1 here; ignoring FU key={_requested_fu_slot}")
-            _fu_api, _fu_dual_env, _fg_slot = _resolve_fastgen_slot('1', allow_dual=False)
-            _fu_parallel = _flowultra_parallel()
-            _fu_end_dir = str(Path(p_dir) / 'generated') if os.environ.get('BEGO_FU_END_IMAGE') == '1' else None
-            print(f"  [BOTH] Starting FastGen Flow Ultra keyframes (fastgen_key={_fg_slot}, parallel={_fu_parallel})...")
-            return generate_all_videos_flow_ultra(
-                project_dir=p_dir,
-                mode='keyframes',
-                max_parallel=_fu_parallel,
-                aspect_ratio=ar,
-                clip_ids=_vislide_ids,
-                single_prompt=single_prompt,
-                api_key=_fu_api,
-                dual_key=_fu_dual_env,
-                end_image_dir=_fu_end_dir,
-                prompts_file_path=prompts_file_path,
-                silent=True,
-                no_cancel=True,
-            )
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            jobs[executor.submit(_run_veo_provider)] = 'VeoNonStop'
-            jobs[executor.submit(_run_flowultra_provider)] = 'Flow Ultra'
-            results = {}
-            for fut in as_completed(jobs):
-                label = jobs[fut]
-                try:
-                    results[label] = fut.result()
-                except Exception as e:
-                    print(f"  [BOTH] {label} failed: {e}")
-                    logging.debug(traceback.format_exc())
-                    results[label] = {'generated': 0, 'failed': 1, 'results': []}
-
-        if _vislide_ids:
-            _vislide_copy_static(_vislide_ids)
-        total_failed = sum(int(r.get('failed', 0) or 0) for r in results.values())
-        total_generated = sum(int(r.get('generated', 0) or 0) for r in results.values())
-        print("  [BOTH] Video providers done -> vid_img/")
-        for label, r in results.items():
-            print(f"  [BOTH]   {label}: ok={r.get('generated', 0)} fail={r.get('failed', 0)}")
-        return {'generated': total_generated, 'failed': total_failed, 'results': results}
-
     def _run_cinai_video_stage(
         mode: str,
         *,
@@ -1926,118 +1767,13 @@ def _run_post_pipeline_silent(
             _vislide_copy_static(_vislide_ids)
         return result
 
-    def _run_parallel_veo_cinai_i2v(prompts_file_path: str = None) -> dict:
-        """Run VeoNonStop and CinAI in isolated output dirs, then merge first-success."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        single_prompt = _video_single_prompt()
-        cinai_stage_dir = "vid_img_cinai"
-        jobs = {}
-
-        _vislide_ids = _get_vislide_clip_ids() if vislide_interval >= 2 else None
-
-        def _run_veo():
-            if not _has_any_veo_key():
-                print("  [BOTH] VeoNonStop skipped: no keys configured")
-                return {'generated': 0, 'failed': 0, 'results': []}
-            return veo_generate_all_videos(
-                project_dir=p_dir,
-                mode='i2v',
-                max_parallel=video_parallel,
-                aspect_ratio=ar,
-                single_prompt=single_prompt,
-                active_keys=_resolve_veo_key(video_key_slot),
-                clip_ids=_vislide_ids,
-                silent=True,
-                no_cancel=True,
-                prompts_file_path=prompts_file_path,
-            )
-
-        def _run_cinai():
-            return _run_cinai_video_stage(
-                "i2v",
-                output_dir_name=cinai_stage_dir,
-                prompts_file_path=prompts_file_path,
-            )
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            jobs[executor.submit(_run_veo)] = "VeoNonStop"
-            jobs[executor.submit(_run_cinai)] = "CinAI"
-            provider_results = {}
-            for future in as_completed(jobs):
-                label = jobs[future]
-                try:
-                    provider_results[label] = future.result()
-                except Exception as exc:
-                    logging.debug(traceback.format_exc())
-                    print(f"  [BOTH] {label} failed: {exc}")
-                    provider_results[label] = {'generated': 0, 'failed': 1, 'results': []}
-
-        primary_dir = Path(p_dir) / "vid_img"
-        secondary_dir = Path(p_dir) / cinai_stage_dir
-        primary_dir.mkdir(parents=True, exist_ok=True)
-        merge_policy = os.environ.get("CINAI_BOTH_MERGE_POLICY", "first_success").strip().lower()
-        if merge_policy not in ("first_success", "preferred_provider", "keep_all"):
-            merge_policy = "first_success"
-        merge_result = cinai_merge_video_outputs(
-            primary_dir,
-            secondary_dir,
-            policy=merge_policy,
-            preferred_provider=os.environ.get("CINAI_BOTH_PREFERRED_PROVIDER", "veononstop"),
-        )
-        merged = int(merge_result.get("merged", 0) or 0)
-        if _vislide_ids:
-            _vislide_copy_static(_vislide_ids)
-        try:
-            from units.cinai_motion import _load_project_clips
-            from units.source_ledger import VIDEO_SKIP_SOURCES
-            expected_ids = {
-                int(item["id"])
-                for item in _load_project_clips(Path(p_dir))
-                if item.get("id") is not None
-                and item.get("source") not in VIDEO_SKIP_SOURCES
-            }
-        except Exception:
-            expected_ids = set()
-        if _vislide_ids:
-            expected_ids &= set(_vislide_ids)
-        selected_ids = {
-            int(path.stem)
-            for path in primary_dir.glob("*.mp4")
-            if path.stem.isdigit()
-        }
-        if expected_ids:
-            selected_ids &= expected_ids
-        total_failed = len(expected_ids - selected_ids) if expected_ids else sum(
-            int(item.get("failed", 0) or 0) for item in provider_results.values()
-        )
-        provider_generated = sum(
-            int(item.get("generated", 0) or 0) for item in provider_results.values()
-        )
-        total_generated = len(selected_ids) if expected_ids else provider_generated
-        print(
-            f"  [BOTH] VeoNonStop + CinAI done: selected={total_generated}, "
-            f"provider_generated={provider_generated}, merged_from_cinai={merged}, "
-            f"failed={total_failed}"
-        )
-        return {
-            "generated": total_generated,
-            "failed": total_failed,
-            "provider_generated": provider_generated,
-            "results": provider_results,
-            "merged": merged,
-            "overwritten": int(merge_result.get("overwritten", 0) or 0),
-            "selected": merge_result.get("selected", {}),
-            "merge_policy": merge_policy,
-        }
-
     # ── REF SIZE PREFLIGHT ────────────────────────────────────────────────────
     # Compress any refs that exceed 1.5 MB before any API calls touch them.
     # (Primary compression runs in a background thread during transcription;
     #  this call is a safety net for direct invocations and any leftovers.)
     _ref_dir_pf = Path(project_dir) / 'ref'
     if _ref_dir_pf.exists():
-        _ref_limit = 2.0 if action in ('fastgen', 'fastgen_i2v', 'both_i2v') else 5.0
+        _ref_limit = 2.0 if action in ('fastgen', 'fastgen_i2v') else 5.0
         compress_refs(str(_ref_dir_pf), max_mb=_ref_limit)
     # ─────────────────────────────────────────────────────────────────────────
 
@@ -2055,11 +1791,11 @@ def _run_post_pipeline_silent(
 
     def _img_stage_provider() -> Optional[str]:
         """Кто наполняет generated/ на этом action (None — стадии нет)."""
-        if action in ('fastgen', 'fastgen_i2v', 'fastgen_ultra_i2v'):
+        if action in ('fastgen', 'fastgen_i2v'):
             return 'fastgen'
         if action == 'cinai':
             return 'cinai'
-        if action in ('imggen', 'veo_i2v', 'both_i2v'):
+        if action in ('imggen', 'veo_i2v'):
             return _pipeline_img_gen
         return None
 
@@ -2067,12 +1803,6 @@ def _run_post_pipeline_silent(
         """Кто наполняет vid_img/ на этом action (None — стадии нет)."""
         if action in ('fastgen', 'imggen', 'cinai', 'skip'):
             return None
-        if action.startswith('fastgen_ultra'):
-            return 'fastgen_ultra'
-        if action == 'cinai_components':
-            return 'cinai'
-        if action == 'both_i2v':
-            return 'both_cinai' if _env_video_engine == 'both_cinai' else 'both_flowultra'
         if action == 'fastgen_i2v':
             return 'veononstop'
         return 'cinai' if _env_video_engine == 'cinai' else 'veononstop'
@@ -2116,15 +1846,7 @@ def _run_post_pipeline_silent(
             return None
         if engine == 'cinai':
             return f"VideoGen: {_cinai_video_summary()}"
-        if engine == 'fastgen_ultra':
-            return f"VideoGen: FastGen Flow Ultra (workers {_flowultra_parallel()})"
-        _veo = f"VeoNonStop (key {video_key_slot}, workers {video_parallel})"
-        if engine == 'both_cinai':
-            return f"VideoGen: {_veo} + {_cinai_video_summary()}"
-        if engine == 'both_flowultra':
-            return (f"VideoGen: {_veo} + FastGen Flow Ultra "
-                    f"(workers {_flowultra_parallel()})")
-        return f"VideoGen: {_veo}"
+        return f"VideoGen: VeoNonStop (key {video_key_slot}, workers {video_parallel})"
 
     print(f"\n  [Silent] Post-pipeline: {action.upper()}")
     print("  " + "  |  ".join(
@@ -2274,183 +1996,6 @@ def _run_post_pipeline_silent(
             elif inflight_mode and _watch_proc is not None:
                 _watch_proc.terminate()
 
-        elif action == 'both_i2v':
-            _both_cinai = (
-                os.environ.get('BEGO_VIDEO_ENGINE', '').strip().lower()
-                == 'both_cinai'
-            )
-            from pathlib import Path as _Path
-            img_source = (os.environ.get('PIPELINE_IMG_GEN') or getattr(config, 'PIPELINE_IMG_GEN', 'veononstop') or 'veononstop').lower()
-            img_failed = 0
-
-            _watch_procs = []
-            _watch_ready = _th.Event()
-
-            def _launch_both_watchers(prompts_file_path: str = None):
-                started = []
-                if _has_any_veo_key():
-                    started.append(('VeoNonStop', _start_inflight_watcher_for_engine(
-                        'veononstop', prompts_file_path=prompts_file_path)))
-                else:
-                    print("  [INFLIGHT BOTH] VeoNonStop watcher skipped: no VEONONSTOP keys")
-                if _both_cinai:
-                    if getattr(config, 'CINAI_ACCESS_TOKEN', ''):
-                        started.append(('CinAI', _start_inflight_watcher_for_engine(
-                            'cinai', prompts_file_path=prompts_file_path)))
-                    else:
-                        print("  [INFLIGHT BOTH] CinAI watcher skipped: CINAI_ACCESS_TOKEN empty")
-                elif getattr(config, 'FASTGEN_API_KEY', ''):
-                    started.append(('Flow Ultra', _start_inflight_watcher_for_engine(
-                        'fastgen_ultra', prompts_file_path=prompts_file_path)))
-                else:
-                    print("  [INFLIGHT BOTH] Flow Ultra watcher skipped: FASTGEN_API_KEY empty")
-                return [(label, proc) for label, proc in started if proc is not None]
-
-            if inflight_mode:
-                if _should_adapt:
-                    def _launch_both_after_adapt():
-                        nonlocal _watch_procs
-                        _inflight_prompts = None
-                        if _adapt_event.wait(timeout=600) and _adapt_result[0]:
-                            _inflight_prompts = _adapt_result[0]
-                            print(f"  [codex-adapt] Ready: {Path(_inflight_prompts).name}")
-                        else:
-                            print("  [codex-adapt] Timeout — watchers use original prompts")
-                        _watch_procs = _launch_both_watchers(_inflight_prompts)
-                        _watch_ready.set()
-                    _th.Thread(target=_launch_both_after_adapt, daemon=True,
-                               name='deferred-both-watchers').start()
-                    print("  [INFLIGHT BOTH] Watchers will start after VEO adapt finishes")
-                else:
-                    _watch_procs = _launch_both_watchers(None)
-                    _watch_ready.set()
-
-            if img_source == 'skip':
-                ok = _count_generated_images()
-                result = {'generated': ok, 'failed': 0}
-                print(f"  [BOTH] ImageGen skipped; existing generated images: {ok}")
-            else:
-                try:
-                    print(f"  [BOTH] Starting {img_source} ImageGen...")
-                    result = _run_image_generation(img_source)
-                except Exception as exc:
-                    print(f"  [SKIP] ImageGen failed to start: {exc}")
-                    return
-                ok = int(result.get('generated', 0) or 0)
-                img_failed = int(result.get('failed', 0) or 0)
-                print(
-                    f"  [BOTH] {img_source} ImageGen done: {ok} images "
-                    f"-> generated/  (failed={img_failed})"
-                )
-            _mark_inflight_imagegen_done()
-
-            existing_images = _count_generated_images()
-            if ok <= 0 and existing_images > 0:
-                ok = existing_images
-                print(f"  [BOTH] Using existing generated/ images: {existing_images}")
-
-            _t2v_result = _run_t2v_image_fallback(result)
-            if _t2v_result is not None:
-                img_failed = int(_t2v_result.get('failed', 0) or 0)
-                if img_failed > 0:
-                    _save_failed_prompts(p_dir, 't2v', img_failed)
-            elif img_failed > 0:
-                _save_failed_prompts(p_dir, 'imggen', img_failed)
-
-            if ok <= 0:
-                print("  [SKIP] No images available in generated/ — cannot run both i2v providers")
-                for _, proc in _watch_procs:
-                    try:
-                        proc.terminate()
-                    except Exception:
-                        pass
-                return
-
-            if _both_cinai and inflight_mode:
-                import shutil
-                _watch_ready.wait(timeout=660)
-                expected_watchers = {"VeoNonStop", "CinAI"}
-                actual_watchers = {label for label, _ in _watch_procs}
-                _inflight_ok = expected_watchers.issubset(actual_watchers)
-                if not _inflight_ok:
-                    missing = ", ".join(sorted(expected_watchers - actual_watchers))
-                    print(
-                        f"  [INFLIGHT BOTH] Required provider watcher(s) missing: "
-                        f"{missing}; finalized fallback will run"
-                    )
-                for label, proc in _watch_procs:
-                    print(f"  [INFLIGHT BOTH] Waiting for {label} watcher...")
-                    _watch_ok = _wait_inflight_watcher(
-                        proc,
-                        p_dir,
-                        output_dir_name='vid_img_cinai' if label == 'CinAI' else 'vid_img',
-                    )
-                    _inflight_ok = _inflight_ok and _watch_ok
-                _cinai_stage = Path(p_dir) / 'vid_img_cinai'
-                _primary_stage = Path(p_dir) / 'vid_img'
-                _primary_stage.mkdir(parents=True, exist_ok=True)
-                if _cinai_stage.exists():
-                    for candidate in sorted(_cinai_stage.glob('*.mp4')):
-                        target = _primary_stage / candidate.name
-                        if not target.exists():
-                            shutil.copy2(candidate, target)
-                if _inflight_ok:
-                    print("  [BOTH] VeoNonStop + CinAI inflight complete -> vid_img/")
-                    return
-                print("  [BOTH] Inflight pair incomplete; finalized branch will fill missing clips")
-
-            if _both_cinai:
-                prompts_file_path = None
-                if _should_adapt:
-                    if not _adapt_event.wait(timeout=600):
-                        print("  [codex-adapt] Timeout - using original prompts")
-                    elif _adapt_result[0]:
-                        prompts_file_path = _adapt_result[0]
-                        print(f"  [codex-adapt] Ready: {Path(prompts_file_path).name}")
-                print("  [BOTH] Starting parallel VideoGen: VeoNonStop + CinAI...")
-                vid_result = _run_parallel_veo_cinai_i2v(
-                    prompts_file_path=prompts_file_path,
-                )
-                vid_failed = int(vid_result.get('failed', 0) or 0)
-                total_failed = img_failed + vid_failed
-                if total_failed > 0:
-                    marker = Path(p_dir) / 'has_failed_clips.flag'
-                    marker.write_text(
-                        f"img_failed={img_failed}\nvid_failed={vid_failed}\n"
-                        "mode=both_i2v\nproviders=veononstop,cinai\n",
-                        encoding='utf-8',
-                    )
-                    print(f"  [WARNING] {total_failed} clips failed (img={img_failed}, vid={vid_failed})")
-                return
-
-            if inflight_mode:
-                _watch_ready.wait(timeout=660)
-                _inflight_ok = False
-                for label, proc in _watch_procs:
-                    print(f"  [INFLIGHT BOTH] Waiting for {label} watcher...")
-                    _inflight_ok = _wait_inflight_watcher(proc, p_dir) or _inflight_ok
-                if _inflight_ok:
-                    print("  both_i2v done -> vid_img/ (via inflight watchers)")
-                    return
-
-            prompts_file_path = None
-            if _should_adapt:
-                if not _adapt_event.wait(timeout=600):
-                    print("  [codex-adapt] Timeout — using original prompts")
-                elif _adapt_result[0]:
-                    prompts_file_path = _adapt_result[0]
-                    print(f"  [codex-adapt] Ready: {Path(prompts_file_path).name}")
-
-            print("  [BOTH] Starting parallel VideoGen: VeoNonStop + FastGen Flow Ultra...")
-            vid_result = _run_parallel_i2v_providers(prompts_file_path=prompts_file_path)
-            vid_failed = int(vid_result.get('failed', 0) or 0)
-            total_failed = img_failed + vid_failed
-            if total_failed > 0:
-                marker = Path(p_dir) / 'has_failed_clips.flag'
-                marker.write_text(f"img_failed={img_failed}\nvid_failed={vid_failed}\nmode=both_i2v\n", encoding='utf-8')
-                print(f"  [WARNING] {total_failed} clips failed (img={img_failed}, vid={vid_failed})")
-                print(f"  Failed info saved to: failed_prompts.txt + has_failed_clips.flag")
-
         elif action == 'imggen':
             # Image generation only — no i2v (used by slideshow mode).
             # VideoGen is VeoNonStop here. ImageGen is selected independently
@@ -2500,128 +2045,6 @@ def _run_post_pipeline_silent(
             _mark_inflight_imagegen_done()
             if img_failed > 0:
                 _save_failed_prompts(p_dir, 'imggen', img_failed)
-
-        elif action == INTRO_I2V_T2V_MODE:
-            if not _has_any_veo_key():
-                print("  [SKIP] VeoNonStop key not set in any slot (1-4)")
-                return
-            if inflight_mode:
-                print(
-                    "  [Intro I2V + T2V] Inflight is disabled for this mixed route; "
-                    "it has both image-driven and direct-video clips."
-                )
-
-            intro_ids, t2v_ids = _get_intro_i2v_t2v_clip_ids()
-            if not intro_ids and not t2v_ids:
-                print("  [SKIP] Intro I2V + T2V: montage plan has no usable clips")
-                return
-
-            img_source = (
-                os.environ.get('PIPELINE_IMG_GEN')
-                or getattr(config, 'PIPELINE_IMG_GEN', 'veononstop')
-                or 'veononstop'
-            ).lower()
-            image_result = {'generated': 0, 'failed': 0, 'failed_ids': []}
-            if intro_ids:
-                if img_source == 'skip':
-                    image_result = {
-                        'generated': 0,
-                        'failed': len(intro_ids),
-                        'failed_ids': intro_ids,
-                    }
-                    print(
-                        "  [Intro I2V + T2V] ImageGen is Skip, so intro clips "
-                        "cannot be sent to I2V."
-                    )
-                else:
-                    print(
-                        f"  Starting {img_source} ImageGen for "
-                        f"{len(intro_ids)} intro clip(s)..."
-                    )
-                    image_result = _run_image_generation(
-                        img_source, clip_ids=intro_ids)
-                    print(
-                        f"  {img_source.capitalize()} intro ImageGen done: "
-                        f"{image_result.get('generated', 0)} images -> generated/"
-                    )
-            _mark_inflight_imagegen_done()
-
-            # Preserve the existing quota policy: an intro image that cannot be
-            # made may still become T2V through the separately configured quota
-            # fallback. The normal path remains I2V for every available intro frame.
-            fallback_result = _run_t2v_image_fallback(image_result)
-            image_failed = (
-                int(fallback_result.get('failed', 0) or 0)
-                if fallback_result is not None
-                else int(image_result.get('failed', 0) or 0)
-            )
-
-            prompts_file_path = None
-            if _should_adapt:
-                if not _adapt_event.wait(timeout=600):
-                    print("  [codex-adapt] Timeout - using original prompts")
-                else:
-                    prompts_file_path = _adapt_result[0]
-
-            vid_keys = _resolve_veo_key(video_key_slot)
-            single_prompt = _video_single_prompt()
-            i2v_failed = 0
-            intro_ready_ids = [cid for cid in intro_ids if _image_exists(cid)]
-            if intro_ready_ids:
-                print(
-                    f"  Starting VeoNonStop I2V for {len(intro_ready_ids)} "
-                    "intro clip(s)..."
-                )
-                i2v_result = veo_generate_all_videos(
-                    project_dir=p_dir,
-                    mode='i2v',
-                    max_parallel=video_parallel,
-                    aspect_ratio=ar,
-                    single_prompt=single_prompt,
-                    active_keys=vid_keys,
-                    clip_ids=intro_ready_ids,
-                    silent=True,
-                    prompts_file_path=prompts_file_path,
-                )
-                i2v_failed = int(i2v_result.get('failed', 0) or 0)
-            elif intro_ids and fallback_result is None:
-                print("  [Intro I2V + T2V] No generated intro frames available for I2V")
-
-            t2v_failed = 0
-            if t2v_ids:
-                print(
-                    f"  Starting VeoNonStop T2V for {len(t2v_ids)} "
-                    "post-intro clip(s)..."
-                )
-                t2v_result = veo_generate_all_videos(
-                    project_dir=p_dir,
-                    mode='t2v',
-                    max_parallel=video_parallel,
-                    aspect_ratio=ar,
-                    single_prompt=single_prompt,
-                    active_keys=vid_keys,
-                    clip_ids=t2v_ids,
-                    silent=True,
-                    prompts_file_path=prompts_file_path,
-                )
-                t2v_failed = int(t2v_result.get('failed', 0) or 0)
-
-            total_failed = image_failed + i2v_failed + t2v_failed
-            if total_failed:
-                _save_failed_prompts(p_dir, INTRO_I2V_T2V_MODE, total_failed)
-                marker = Path(p_dir) / 'has_failed_clips.flag'
-                marker.write_text(
-                    f"intro_image_failed={image_failed}\n"
-                    f"intro_i2v_failed={i2v_failed}\n"
-                    f"post_intro_t2v_failed={t2v_failed}\n",
-                    encoding='utf-8',
-                )
-                print(
-                    f"  [WARNING] {total_failed} clips failed "
-                    f"(intro image={image_failed}, i2v={i2v_failed}, t2v={t2v_failed})"
-                )
-            else:
-                print("  Intro I2V + T2V done -> vid_img/")
 
         elif action == 'veo_i2v':
             _cinai_video_selected = (
@@ -2823,19 +2246,12 @@ def _run_post_pipeline_silent(
             elif inflight_mode and _watch_proc is not None:
                 _watch_proc.terminate()
 
-        elif action in ('t2v', 'i2v', 'first_last', 'reference', 'components', 'cinai_components'):
-            if (
-                os.environ.get('BEGO_VIDEO_ENGINE', '').strip().lower() == 'cinai'
-                or action == 'cinai_components'
-            ):
-                cinai_mode = 'components' if action in ('components', 'cinai_components') else action
-                result = _run_cinai_video_stage(
-                    cinai_mode,
-                    reference_dir=str(Path(p_dir) / 'ref') if cinai_mode == 'reference' else None,
-                )
+        elif action == 't2v':
+            if os.environ.get('BEGO_VIDEO_ENGINE', '').strip().lower() == 'cinai':
+                result = _run_cinai_video_stage(action)
                 vid_failed = int(result.get('failed', 0) or 0)
                 if vid_failed > 0:
-                    _save_failed_prompts(p_dir, cinai_mode, vid_failed)
+                    _save_failed_prompts(p_dir, action, vid_failed)
                 return
             # Любой из четырёх слотов: ниже ключ всё равно берётся по
             # video_key_slot, и проверять только первый — значит скипнуть
@@ -2858,26 +2274,8 @@ def _run_post_pipeline_silent(
                         aspect_ratio=ar)
             except Exception as _cover_exc:              # noqa: BLE001
                 print(f"  [Обложка] пропущена: {_cover_exc}")
-            if action in ('i2v', 'first_last'):
-                # Голая ветка — резюм-режим БЕЗ ImageGen: источники обязаны
-                # уже лежать в generated/. Гард распространён и на first_last
-                # (тоже кормится из generated/), а проверка видит не только
-                # png — CinAI/сток кладут и jpg/webp.
-                from pathlib import Path as _Path
-                gen_dir = _Path(project_dir) / 'generated'
-                _has_imgs = gen_dir.exists() and any(
-                    any(gen_dir.glob(f'*{_e}'))
-                    for _e in ('.png', '.jpg', '.jpeg', '.webp')
-                )
-                if not _has_imgs:
-                    print(f"  [SKIP] {action} requires images in generated/ — run ImageGen first")
-                    return
-            ref_dir = None
-            if action == 'components':
-                from pathlib import Path as _Path
-                ref_dir = str(_Path(project_dir) / 'ref')
             vid_keys = _resolve_veo_key(video_key_slot)
-            _vislide_ids = _get_vislide_clip_ids() if (vislide_interval >= 2 and action == 'i2v') else None
+            _vislide_ids = None          # вислайд в t2v не применяется: кадров-слайдов нет
             # Обложку уже оживили выше — стадии её не отдаём, иначе она сделает
             # клип заново и затрёт готовый файл. Если списка не было (стадия
             # берёт все клипы), собираем его без обложки.
@@ -2903,7 +2301,6 @@ def _run_post_pipeline_silent(
             vid_result = veo_generate_all_videos(
                 project_dir=p_dir, mode=action,
                 max_parallel=video_parallel, aspect_ratio=ar,
-                ref_dir=ref_dir,
                 active_keys=vid_keys,
                 clip_ids=_vislide_ids,
                 silent=True,
@@ -2920,136 +2317,12 @@ def _run_post_pipeline_silent(
                 print(f"  [WARNING] {vid_failed} clips failed in {action}")
                 print(f"  Failed info saved to: failed_prompts.txt + has_failed_clips.flag")
 
-        elif action in ('fastgen_ultra_t2v', 'fastgen_ultra_ingredients', 'fastgen_ultra_i2v'):
-            if not getattr(config, 'FASTGEN_API_KEY', ''):
-                print("  [SKIP] FASTGEN_API_KEY not set")
-                return
-            from units.flow_ultra_engine import generate_all_videos_flow_ultra
-            _mode_map = {
-                'fastgen_ultra_t2v':         't2v',
-                'fastgen_ultra_ingredients': 'ingredients',
-                'fastgen_ultra_i2v':         'keyframes',
-            }
-            _fu_mode = _mode_map[action]
-            _fu_ref_dir = None
-            if _fu_mode == 'ingredients':
-                from pathlib import Path as _Path
-                _fu_ref_dir = str(_Path(project_dir) / 'ref')
-
-            # === Inflight watcher: start BEFORE ImageGen so it animates images as they appear ===
-            _watch_proc = None
-            _watch_ready = _th.Event()
-            if _fu_mode == 'keyframes' and inflight_mode:
-                # Pipeline env var routes _start_inflight_watcher → live_flow.py
-                os.environ['BEGO_VIDEO_ENGINE'] = 'fastgen_ultra'
-                if _should_adapt:
-                    def _launch_fu_watcher_after_adapt():
-                        nonlocal _watch_proc
-                        _inflight_prompts = None
-                        if _adapt_event.wait(timeout=600) and _adapt_result[0]:
-                            _inflight_prompts = _adapt_result[0]
-                            print(f"  [codex-adapt] Ready: {Path(_inflight_prompts).name}")
-                        else:
-                            print("  [codex-adapt] Timeout — watcher uses original prompts")
-                        _watch_proc = _start_inflight_watcher(
-                            p_dir, '1', _flowultra_parallel(), ar, prompt_mode,
-                            vislide_interval=vislide_interval,
-                            prompts_file_path=_inflight_prompts)
-                        _watch_ready.set()
-                    _th.Thread(target=_launch_fu_watcher_after_adapt, daemon=True,
-                                name='deferred-fu-watcher').start()
-                    print("  [INFLIGHT] FU watcher will start after VEO adapt finishes")
-                else:
-                    _watch_proc = _start_inflight_watcher(
-                        p_dir, '1', _flowultra_parallel(), ar, prompt_mode,
-                        vislide_interval=vislide_interval)
-                    _watch_ready.set()
-
-            # === ImageGen FIRST for keyframes mode (needs generated/<NNN>.png per clip) ===
-            # Matches fastgen_i2v pattern — t2v and ingredients skip this step.
-            if _fu_mode == 'keyframes':
-                print("  Starting FastGen image generation (for Flow Ultra keyframes)...")
-                _img_api, _img_dual, _img_slot = _resolve_fastgen_slot(imggen_key_slot, allow_dual=True)
-                _img_result = generate_all_images(
-                    project_dir=p_dir,
-                    api_key=_img_api,
-                    dual_key=_img_dual,
-                    preflight=not _skip_pf,
-                    silent=True,
-                )
-                _img_ok = _img_result.get('generated', 0)
-                _img_failed = _img_result.get('failed', 0)
-                print(f"  FastGen ImageGen done: {_img_ok} images -> generated/  (failed={_img_failed})")
-                if _img_failed > 0:
-                    _save_failed_prompts(p_dir, 'imggen', _img_failed)
-                if _img_ok == 0:
-                    print("  [SKIP] ImageGen produced 0 images — cannot run Flow Ultra keyframes")
-                    return
-
-            # === Flow Ultra video generation ===
-            # Single-prompt mode: read single_prompt.txt as VeoNonStop path does
-            _fu_single_prompt = None
-            if prompt_mode == 'single':
-                sp_path = Path(p_dir) / 'single_prompt.txt'
-                if sp_path.exists():
-                    _fu_single_prompt = sp_path.read_text(encoding='utf-8-sig').strip() or None
-                    if _fu_single_prompt:
-                        print(f"  Using single_prompt.txt: {_fu_single_prompt[:50]}...")
-                else:
-                    _fu_single_prompt = 'default'  # first prompt from prompts file
-            # Vislide clip_ids filter (reuse helper)
-            _fu_vislide_ids = _get_vislide_clip_ids() if vislide_interval >= 2 else None
-            # Flow Ultra uses the existing video key slot setting, mapped to FastGen keys.
-            _fu_video_slot = str(video_key_slot or '1').lower()
-            if _fu_video_slot not in ('1', 'key1', 'main'):
-                print(f"  [WARN] Flow Ultra supports only FastGen Key1 here; ignoring video key={video_key_slot}")
-            _fu_api, _fu_dual_env, _fg_slot = _resolve_fastgen_slot('1', allow_dual=False)
-            # End-image dir for keyframes mode (BEGO_FU_END_IMAGE=1)
-            _fu_end_dir = None
-            if _fu_mode == 'keyframes' and os.environ.get('BEGO_FU_END_IMAGE') == '1':
-                _fu_end_dir = str(Path(p_dir) / 'generated')
-
-            # === Inflight branch: wait for watcher to finish (it handles video gen) ===
-            _inflight_ok = False
-            if _fu_mode == 'keyframes' and inflight_mode:
-                _watch_ready.wait(timeout=660)
-                if _watch_proc is not None:
-                    _inflight_ok = _wait_inflight_watcher(_watch_proc, p_dir)
-                if _inflight_ok:
-                    # Watcher already produced videos — skip in-process FU batch
-                    print(f"  {action} done -> vid_img/ (via inflight watcher)")
-                    return
-
-            _fu_parallel = _flowultra_parallel()
-            print(f"  Starting FastGen Flow Ultra ({_fu_mode})  fastgen_key={_fg_slot} dual={_fu_dual_env} parallel={_fu_parallel}")
-            vid_result = generate_all_videos_flow_ultra(
-                project_dir=p_dir,
-                mode=_fu_mode,
-                max_parallel=_fu_parallel,
-                aspect_ratio=ar,
-                ref_dir=_fu_ref_dir,
-                single_prompt=_fu_single_prompt,
-                clip_ids=_fu_vislide_ids,
-                api_key=_fu_api,
-                dual_key=_fu_dual_env,
-                end_image_dir=_fu_end_dir,
-                silent=True,
-            )
-            vid_failed = vid_result.get('failed', 0)
-            print(f"  {action} done -> vid_img/  (ok={vid_result.get('generated',0)}, fail={vid_failed})")
-            if _fu_vislide_ids:
-                print(f"  Vislide: {len(_fu_vislide_ids)} clips animated")
-            if vid_failed > 0:
-                marker = Path(p_dir) / 'has_failed_clips.flag'
-                marker.write_text(f"vid_failed={vid_failed}\nmode={action}\n", encoding='utf-8')
-                print(f"  [WARNING] {vid_failed} clips failed in {action}")
-
     except Exception as e:
         print(f"  [ERROR] Post-pipeline {action} failed: {e}")
         logging.debug(traceback.format_exc())
     finally:
         # ── Хвост пайплайна в finally: у веток генерации есть ранние return
-        # (CinAI veo_i2v/t2v, both_cinai, inflight-пары, FU inflight). Раньше
+        # (CinAI veo_i2v/t2v, inflight-пары). Раньше
         # каждый такой return перепрыгивал ожидание фоновых стадий и Pre-concat
         # fallback — real_photo/stock оставались *_pending в montage_plan, и
         # очередь склейки падала на ConcatGuard (инцидент ВВВ_20260815_0150).
@@ -3346,238 +2619,6 @@ def _run_post_pipeline_silent(
     except Exception as _vqe:                              # noqa: BLE001
         logging.debug("Очередь видео: закрытие не удалось: %s", _vqe)
 
-
-
-def _ask_post_pipeline_action(project_dir: str, clip_ids=None, aspect_ratio: str = None) -> None:
-    """Interactive menu after direction completes: what to do next with prompts."""
-    if not _has_any_veo_key():
-        # Ни одного ключа VeoNonStop (ни в одном слоте) — меню не о чем
-        return
-
-    print("\n" + "=" * 60)
-    print("  WHAT TO DO NEXT?")
-    print("=" * 60)
-    print()
-    print("  [1] FastGen images + VeoNonStop animate (i2v)")
-    print("  [2] VeoNonStop images (Imagen/Banana) + VeoNonStop animate (i2v)")
-    print("  [3] Prompts -> VeoNonStop text-to-video (t2v)")
-    print("  [4] Prompts + refs -> VeoNonStop components (multi-image-to-video)")
-    print("  [5] FastGen images only (no video)")
-    print("  [6] VeoNonStop images only (no video)")
-    print("  [7] Skip — manual workflow")
-    print()
-
-    while True:
-        choice = input("  Select [1-7, Enter=7]: ").strip() or '7'
-        if choice in ('1', '2', '3', '4', '5', '6', '7'):
-            break
-        print("  Enter 1-7")
-
-    if choice == '7':
-        print("  Skipped. Use run_generate / run_img2video bat files manually.")
-        return
-
-    p_dir = str(project_dir)
-
-    # --- Aspect ratio ---
-    ar = aspect_ratio or config.VEONONSTOP_ASPECT_RATIO
-    print(f"\n  Aspect ratio (current: {ar}):")
-    print("    [1] 16:9  [2] 9:16")
-    ar_sel = input(f"    Select [1/2, Enter={ar}]: ").strip()
-    if ar_sel == '1': ar = '16:9'
-    elif ar_sel == '2': ar = '9:16'
-
-    # --- Parallel workers ---
-    par = config.VEONONSTOP_MAX_PARALLEL
-    par_input = input(f"\n  Parallel workers [1-24, Enter={par}]: ").strip()
-    if par_input.isdigit() and 1 <= int(par_input) <= 24:
-        par = int(par_input)
-
-    # --- Choices 1, 2: images then i2v ---
-    if choice in ('1', '2'):
-        # Step A: generate images
-        if choice == '1':
-            # FastGen
-            if not config.FASTGEN_API_KEY:
-                print("\n  [ERROR] FASTGEN_API_KEY not set in .env")
-                return
-            print("\n  Starting FastGen image generation...")
-            try:
-                result = generate_all_images(
-                    project_dir=p_dir,
-                    clip_ids=clip_ids,
-                )
-                ok = result.get('generated', 0)
-                print(f"  FastGen done: {ok} images generated")
-            except Exception as e:
-                print(f"  [ERROR] FastGen failed: {e}")
-                return
-        else:
-            # VeoNonStop images — ask which sub-mode
-            print("\n  VeoNonStop image generator:")
-            print("    [1] Imagen 3.5")
-            print("    [2] Banana Pro")
-            print("    [3] Banana Pro + style-reference (iz ref/)")
-            print()
-            while True:
-                img_choice = input("    Select [1/2/3, Enter=1]: ").strip() or '1'
-                if img_choice in ('1', '2', '3'):
-                    break
-                print("    Enter 1, 2, or 3")
-            img_mode = {'1': 'imagen', '2': 'banana', '3': 'banana_ref'}[img_choice]
-            print(f"\n  Starting VeoNonStop image generation ({img_mode})...")
-            try:
-                result = veo_generate_all_images(
-                    project_dir=p_dir,
-                    mode=img_mode,
-                    max_parallel=par,
-                    clip_ids=clip_ids,
-                    aspect_ratio=ar,
-                )
-                ok = result.get('generated', 0)
-                print(f"  VeoNonStop images done: {ok} images generated")
-            except Exception as e:
-                print(f"  [ERROR] VeoNonStop image generation failed: {e}")
-                return
-
-        # Step B: ask prompt source for i2v
-        print("\n  Prompt source for video animation:")
-        print("    [1] Director prompts (per-clip from *_prompts_*.txt)")
-        print("    [2] Single prompt for all clips")
-        print()
-        single_prompt = None
-        while True:
-            ps = input("    Select [1/2, Enter=1]: ").strip() or '1'
-            if ps in ('1', '2'):
-                break
-            print("    Enter 1 or 2")
-        if ps == '2':
-            single_prompt = input("    Enter prompt: ").strip()
-            if not single_prompt:
-                print("    Empty prompt — using per-clip prompts")
-                single_prompt = None
-
-        print("\n  Starting VeoNonStop image-to-video...")
-        try:
-            result = veo_generate_all_videos(
-                project_dir=p_dir,
-                mode='i2v',
-                max_parallel=par,
-                clip_ids=clip_ids,
-                single_prompt=single_prompt,
-                aspect_ratio=ar,
-            )
-            ok = result.get('generated', 0)
-            print(f"\n  img2video done: {ok} videos generated -> vid_img/")
-        except Exception as e:
-            print(f"  [ERROR] img2video failed: {e}")
-        return
-
-    # --- Choice 3: t2v ---
-    if choice == '3':
-        print("\n  Prompt source for text-to-video:")
-        print("    [1] Director prompts (per-clip from *_prompts_*.txt)")
-        print("    [2] Single prompt for all clips")
-        print()
-        single_prompt = None
-        while True:
-            ps = input("    Select [1/2, Enter=1]: ").strip() or '1'
-            if ps in ('1', '2'):
-                break
-            print("    Enter 1 or 2")
-        if ps == '2':
-            single_prompt = input("    Enter prompt: ").strip()
-            if not single_prompt:
-                print("    Empty prompt — using per-clip prompts")
-                single_prompt = None
-
-        print("\n  Starting VeoNonStop text-to-video...")
-        try:
-            result = veo_generate_all_videos(
-                project_dir=p_dir,
-                mode='t2v',
-                max_parallel=par,
-                clip_ids=clip_ids,
-                single_prompt=single_prompt,
-                aspect_ratio=ar,
-            )
-            ok = result.get('generated', 0)
-            print(f"\n  t2v done: {ok} videos generated -> vid_img/")
-        except Exception as e:
-            print(f"  [ERROR] t2v failed: {e}")
-        return
-
-    # --- Choice 4: components (multi-image-to-video) ---
-    if choice == '4':
-        ref_dir = str(Path(project_dir) / 'ref')
-        if not Path(ref_dir).exists():
-            print(f"\n  [WARN] ref/ folder not found: {ref_dir}")
-            custom = input("  Custom ref path (or Enter to cancel): ").strip()
-            if not custom:
-                print("  Cancelled.")
-                return
-            ref_dir = custom
-
-        print("\n  Starting VeoNonStop components (multi-image-to-video)...")
-        try:
-            result = veo_generate_all_videos(
-                project_dir=p_dir,
-                mode='components',
-                max_parallel=par,
-                clip_ids=clip_ids,
-                aspect_ratio=ar,
-                ref_dir=ref_dir,
-            )
-            ok = result.get('generated', 0)
-            print(f"\n  components done: {ok} videos generated -> vid_img/")
-        except Exception as e:
-            print(f"  [ERROR] components failed: {e}")
-        return
-
-    # --- Choice 5: FastGen images only ---
-    if choice == '5':
-        if not config.FASTGEN_API_KEY:
-            print("\n  [ERROR] FASTGEN_API_KEY not set in .env")
-            return
-        print("\n  Starting FastGen image generation...")
-        try:
-            result = generate_all_images(
-                project_dir=p_dir,
-                clip_ids=clip_ids,
-            )
-            ok = result.get('generated', 0)
-            print(f"\n  FastGen done: {ok} images generated -> generated/")
-        except Exception as e:
-            print(f"  [ERROR] FastGen failed: {e}")
-        return
-
-    # --- Choice 6: VeoNonStop images only ---
-    if choice == '6':
-        print("\n  VeoNonStop image generator:")
-        print("    [1] Imagen 3.5")
-        print("    [2] Banana Pro")
-        print("    [3] Banana Pro + style-reference (iz ref/)")
-        print()
-        while True:
-            img_choice = input("    Select [1/2/3, Enter=1]: ").strip() or '1'
-            if img_choice in ('1', '2', '3'):
-                break
-            print("    Enter 1, 2, or 3")
-        img_mode = {'1': 'imagen', '2': 'banana', '3': 'banana_ref'}[img_choice]
-        print(f"\n  Starting VeoNonStop image generation ({img_mode})...")
-        try:
-            result = veo_generate_all_images(
-                project_dir=p_dir,
-                mode=img_mode,
-                max_parallel=par,
-                clip_ids=clip_ids,
-                aspect_ratio=ar,
-            )
-            ok = result.get('generated', 0)
-            print(f"\n  VeoNonStop images done: {ok} images generated -> generated/")
-        except Exception as e:
-            print(f"  [ERROR] VeoNonStop image generation failed: {e}")
-        return
 
 
 def _first_filled(all_keys: list) -> list:
@@ -4306,9 +3347,6 @@ def cmd_process_queue(args):
                                 str(project_dir), post_action, prompt_mode,
                                 use_codex_adapt=getattr(args, 'codex_adapt', False),
                             )
-                        else:
-                            if sys.stdin.isatty():
-                                _ask_post_pipeline_action(str(project_dir))
 
                         # Сигнал для GUI: все этапы завершены, можно запускать конкат
                         print(f"PROJECT_DONE: {project_dir}", flush=True)
@@ -4497,7 +3535,6 @@ def main():
     parser_process.add_argument('--clip-max', type=int, default=None,
                                 help='Максимальная длительность клипа (сек, переопределяет .env)')
     parser_process.add_argument('--post-action',
-                                type=_parse_post_action,
                                 choices=POST_ACTION_CHOICES,
                                 default=None,
                                 help='Post-pipeline generation; ImageGen provider is selected with PIPELINE_IMG_GEN')

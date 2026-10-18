@@ -1,7 +1,6 @@
 """
 Модуль валидации данных
 """
-import json
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -284,32 +283,6 @@ def validate_file_exists(path: str, file_type: str = "Файл") -> Tuple[bool, 
         return False, f"{file_type} не является файлом: {path}"
     
     return True, f"✓ {file_type} найден: {path}"
-
-
-def validate_json_file(path: str) -> Tuple[bool, Dict[str, Any], str]:
-    """
-    Проверка JSON файла
-    
-    Args:
-        path: Путь к JSON файлу
-        
-    Returns:
-        (is_valid, data, сообщение)
-    """
-    path = Path(path)
-    
-    exists, msg = validate_file_exists(path, "JSON файл")
-    if not exists:
-        return False, {}, msg
-    
-    try:
-        with open(path, 'r', encoding='utf-8-sig') as f:
-            data = json.load(f)
-        return True, data, f"✓ JSON валиден: {path}"
-    except json.JSONDecodeError as e:
-        return False, {}, f"Ошибка JSON в {path}: {e}"
-    except Exception as e:
-        return False, {}, f"Ошибка чтения {path}: {e}"
 
 
 def validate_transcription_quality(data: Dict[str, Any], language_code: str = 'ru') -> Tuple[List[str], bool]:

@@ -1534,9 +1534,7 @@ CINAI_VIDEO_CHAIN = os.getenv(
 PIPELINE_VIDEO_ENGINE = (
     os.getenv('PIPELINE_VIDEO_ENGINE', 'veononstop') or 'veononstop'
 ).strip().lower()
-if PIPELINE_VIDEO_ENGINE in ('both',):          # legacy: замороженный FU-режим
-    PIPELINE_VIDEO_ENGINE = 'veononstop'
-if PIPELINE_VIDEO_ENGINE not in ('veononstop', 'cinai', 'both_cinai', 'fastgen_ultra'):
+if PIPELINE_VIDEO_ENGINE not in ('veononstop', 'cinai'):
     PIPELINE_VIDEO_ENGINE = 'veononstop'
 CINAI_VIDEO_ENABLED = os.getenv('CINAI_VIDEO_ENABLED', 'false').lower() in ('true', '1', 'yes')
 # Видеомодели CinAI — ТОЛЬКО бесплатные (безлимитные на тарифе, проверены t2v и i2v

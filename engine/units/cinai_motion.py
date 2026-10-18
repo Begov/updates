@@ -13,7 +13,6 @@ import logging
 import math
 import mimetypes
 import os
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -959,47 +958,6 @@ def _write_failure_report(project_path: Path, failures: Sequence[Mapping[str, An
         )
     else:
         failure_path.unlink(missing_ok=True)
-
-
-def merge_video_outputs(
-    primary_dir: Path,
-    secondary_dir: Path,
-    policy: str = "first_success",
-    preferred_provider: str = "veononstop",
-) -> Dict[str, Any]:
-    """Merge isolated provider outputs into the concat-visible directory."""
-    policy = (policy or "first_success").strip().lower()
-    if policy not in ("first_success", "preferred_provider", "keep_all"):
-        policy = "first_success"
-    primary = Path(primary_dir)
-    secondary = Path(secondary_dir)
-    primary.mkdir(parents=True, exist_ok=True)
-    if policy == "keep_all":
-        return {"policy": policy, "merged": 0, "overwritten": 0, "selected": {}}
-
-    merged = 0
-    overwritten = 0
-    selected: Dict[str, str] = {}
-    candidates = sorted(secondary.glob("*.mp4")) if secondary.exists() else []
-    for candidate in candidates:
-        target = primary / candidate.name
-        if not target.exists():
-            shutil.copy2(candidate, target)
-            merged += 1
-            selected[candidate.stem] = "secondary"
-            continue
-        if policy == "preferred_provider" and preferred_provider.strip().lower() == "cinai":
-            shutil.copy2(candidate, target)
-            overwritten += 1
-            selected[candidate.stem] = "secondary"
-        else:
-            selected[candidate.stem] = "primary"
-    return {
-        "policy": policy,
-        "merged": merged,
-        "overwritten": overwritten,
-        "selected": selected,
-    }
 
 
 def generate_all_videos(

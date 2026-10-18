@@ -66,14 +66,6 @@ def extract_refresh_token(storage: Dict[str, Any]) -> str:
     return ""
 
 
-def extract_auth_credentials(storage: Dict[str, Any]) -> Dict[str, str]:
-    """Extract both credentials without logging or returning browser state."""
-    return {
-        "access_token": extract_access_token(storage),
-        "refresh_token": extract_refresh_token(storage),
-    }
-
-
 def _jwt_expiry_epoch(token: Optional[str]) -> Optional[int]:
     value = (token or "").strip()
     parts = value.split(".")

@@ -33,12 +33,12 @@ import requests
 try:  # файл появляется под своим именем только целиком (см. units/media_io.py)
     from units.media_io import atomic_open, atomic_target, write_bytes_atomic
 except ImportError:                                               # pragma: no cover
-    from media_io import atomic_open, atomic_target, write_bytes_atomic
+    from media_io import atomic_target, write_bytes_atomic
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime, timedelta
 
-# Flow Ultra — module-level shutdown signal + active client registry.
+# FastGen — общий сигнал остановки («Стоп») и реестр активных клиентов.
 # Control Panel's Stop button sets event + calls cancel_all_tasks on each registered client.
 _flowultra_shutdown_event: threading.Event = threading.Event()
 _flowultra_active_clients: 'list' = []
@@ -348,18 +348,6 @@ class FastGenClient:
             return FastGenClient._V6_ENGINE_TO_OPERATION['openai']
         return None
 
-    # Маппинг video-mode → v6 operation_id (Flow Ultra tier).
-    # См. GET /api/v6/capabilities — provider=flow, media_type=video.
-    _V6_VIDEO_MODE_TO_OPERATION = {
-        't2v':         'flow_ultra_video_from_text',
-        'ingredients': 'flow_ultra_video_from_ingredients',
-        'keyframes':   'flow_ultra_video_from_keyframes',
-    }
-
-    @staticmethod
-    def _v6_video_operation(mode: str) -> Optional[str]:
-        return FastGenClient._V6_VIDEO_MODE_TO_OPERATION.get((mode or '').lower())
-
     # aspect_ratio для v6: формат n:n (не Google enum)
     _V6_ASPECT_MAP = {
         'landscape':                    '16:9',
@@ -574,72 +562,6 @@ class FastGenClient:
             response['saved_path'] = output_path
         return response
 
-    def generate_v6_video(
-        self,
-        prompt: str,
-        mode: str,
-        reference_pairs: Optional[List[Tuple[str, str]]] = None,
-        aspect_ratio: Optional[str] = None,
-        output_path: Optional[str] = None,
-        seed: Optional[int] = None,
-        ultra: bool = True,
-        poll_timeout: int = 900,
-    ) -> Dict[str, Any]:
-        """
-        Полный цикл V6 для video (Flow Ultra): submit + poll + download.
-
-        Args:
-            prompt: текст промпта (может содержать [name_ref] токены — биндится к inputs[].name)
-            mode: 't2v' | 'ingredients' | 'keyframes'
-                  t2v          — 0 refs
-                  ingredients  — 1-3 refs (персонажи / объекты, биндятся по имени)
-                  keyframes    — inputs[0]=start frame, inputs[1]=optional end frame
-            reference_pairs: список (name, uri) пар. Имена должны совпадать с токенами в промпте.
-            aspect_ratio: 16:9 / 9:16
-            output_path: куда сохранить готовое видео (.mp4)
-            seed: опциональный seed
-            ultra: True → flow_ultra_*; False → не-ultra tier (через _v6_video_operation override)
-            poll_timeout: video дольше image, дефолт 15 минут
-
-        Returns:
-            dict {id, status, results, error, (saved_path)}
-        """
-        operation = self._v6_video_operation(mode)
-        if not operation:
-            raise RuntimeError(f"V6 video: unknown mode {mode!r}")
-        _mode = (mode or '').lower()
-        _named: Optional[List[Dict[str, str]]] = None
-        _positional: Optional[List[str]] = None
-        _keyframes = False
-        if _mode == 'keyframes':
-            # СТАРТ-ЭНД: опорные КАДРЫ видео позиционно — inputs[0]=старт-кадр,
-            # inputs[1]=конечный кадр (опц.). Без имён + флаг keyframes=True.
-            _positional = [uri for _name, uri in (reference_pairs or []) if uri]
-            _keyframes = True
-        elif _mode == 'ingredients':
-            # components: named-рефы персонажей/объектов (по имени, промпт ссылается [имя]).
-            _named = [
-                {'filename': name, 'input': uri}
-                for name, uri in (reference_pairs or []) if uri
-            ]
-        # t2v: без inputs
-        gen_id = self._v6_submit(
-            operation=operation,
-            prompt=prompt,
-            named_inputs=_named,
-            positional_inputs=_positional,
-            keyframes=_keyframes,
-            ultra=ultra,
-            aspect_ratio=aspect_ratio or config.VEONONSTOP_ASPECT_RATIO or '16:9',
-            seed=seed,
-        )
-        response = self._v6_poll(gen_id, timeout=poll_timeout, interval=5.0)
-        status = response.get('status')
-        if status == 'succeeded' and output_path:
-            self._v6_download(response, output_path)
-            response['saved_path'] = output_path
-        return response
-
     def generate_flow(
         self,
         prompt: str,
@@ -688,80 +610,6 @@ class FastGenClient:
     # ------------------------------------------------------------------
     # Whisk Remix API: генерация с категоризированными референсами
     # ------------------------------------------------------------------
-
-    def generate_whisk(
-        self,
-        prompt: str,
-        subject_uris: Optional[List[str]] = None,
-        scene_uris: Optional[List[str]] = None,
-        style_uris: Optional[List[str]] = None,
-    ) -> str:
-        """
-        Запустить генерацию через V4 Whisk Remix API (асинхронный).
-
-        Args:
-            prompt: Текст промпта
-            subject_uris: Референсы персонажей (MEDIA_CATEGORY_SUBJECT)
-            scene_uris: Референсы локаций (MEDIA_CATEGORY_SCENE)
-            style_uris: Референсы стиля (MEDIA_CATEGORY_STYLE)
-
-        Returns:
-            operation_id для поллинга
-        """
-        url = f"{self.base_url}/v4/whisk/image/remix"
-
-        # Docs: reference_images = [{"image": "file:...", "category": "MEDIA_CATEGORY_..."}, ...]
-        reference_images = []
-        for uri in (subject_uris or []):
-            reference_images.append({'image': uri, 'category': 'MEDIA_CATEGORY_SUBJECT'})
-        for uri in (scene_uris or []):
-            reference_images.append({'image': uri, 'category': 'MEDIA_CATEGORY_SCENE'})
-        for uri in (style_uris or []):
-            reference_images.append({'image': uri, 'category': 'MEDIA_CATEGORY_STYLE'})
-
-        body = {
-            'prompt': prompt,
-            'reference_images': reference_images[:3],  # max 3
-        }
-
-        resp = requests.post(url, headers=self.headers, json=body, timeout=30)
-
-        if resp.status_code == 429:
-            raise RateLimitError("Rate limit exceeded (429)")
-        if resp.status_code != 200:
-            raise RuntimeError(f"Whisk generate failed ({resp.status_code}): {_clean_resp_text(resp.text)}")
-
-        data = resp.json()
-        op_id = data.get('operation_id') or data.get('id')
-        if not op_id:
-            raise RuntimeError(f"No operation_id in response: {data}")
-
-        return op_id
-
-    def generate_whisk_text(
-        self,
-        prompt: str,
-        aspect_ratio: Optional[str] = None,
-        seed: Optional[int] = None,
-    ) -> str:
-        """Whisk без референсов — только текст (Imagen 4)"""
-        url = f"{self.base_url}/v4/whisk/image/generate"
-        body = {
-            'prompt': prompt,
-            'aspect_ratio': self._map_aspect(aspect_ratio or config.FASTGEN_ASPECT_RATIO),
-        }
-        if seed is not None:
-            body['seed'] = seed
-        resp = requests.post(url, headers=self.headers, json=body, timeout=30)
-        if resp.status_code == 429:
-            raise RateLimitError("Rate limit exceeded (429)")
-        if resp.status_code != 200:
-            raise RuntimeError(f"Whisk text generate failed ({resp.status_code}): {_clean_resp_text(resp.text)}")
-        data = resp.json()
-        op_id = data.get('operation_id') or data.get('id')
-        if not op_id:
-            raise RuntimeError(f"No operation_id in response: {data}")
-        return op_id
 
     def generate_flower(
         self,
@@ -824,55 +672,6 @@ class FastGenClient:
         op_id = data.get('operation_id') or data.get('id')
         if not op_id:
             raise RuntimeError(f"No operation_id in response: {data}")
-        return op_id
-
-    def generate_grok(
-        self,
-        prompt: str,
-        aspect_ratio: Optional[str] = None,
-        seed: Optional[int] = None,
-    ) -> str:
-        """Grok image generation (возвращает 4 варианта, берём первый)"""
-        url = f"{self.base_url}/v4/grok/image/generate"
-        body = {
-            'prompt': prompt,
-            'aspect_ratio': self._map_aspect_grok(aspect_ratio or config.FASTGEN_ASPECT_RATIO),
-        }
-        if seed is not None:
-            body['seed'] = seed
-        resp = requests.post(url, headers=self.headers, json=body, timeout=30)
-        if resp.status_code == 429:
-            raise RateLimitError("Rate limit exceeded (429)")
-        if resp.status_code != 200:
-            raise RuntimeError(f"Grok generate failed ({resp.status_code}): {_clean_resp_text(resp.text)}")
-        data = resp.json()
-        op_id = data.get('operation_id') or data.get('id')
-        if not op_id:
-            raise RuntimeError(f"No operation_id in response: {data}")
-        return op_id
-
-    def edit_grok(self, image: str, prompt: str) -> str:
-        """
-        Grok image-to-image edit/transform.
-
-        Args:
-            image: Data URI (data:image/jpeg;base64,...) или file reference (file:xxx)
-            prompt: Описание трансформации ('graphic novel style', etc.)
-
-        Returns:
-            operation_id для поллинга. Результат: list of 2 edited image data URIs.
-        """
-        url = f"{self.base_url}/v4/grok/image/edit"
-        body = {'image': image, 'prompt': prompt}
-        resp = requests.post(url, headers=self.headers, json=body, timeout=30)
-        if resp.status_code == 429:
-            raise RateLimitError("Rate limit exceeded (429)")
-        if resp.status_code != 200:
-            raise RuntimeError(f"Grok edit failed ({resp.status_code}): {_clean_resp_text(resp.text)}")
-        data = resp.json()
-        op_id = data.get('operation_id') or data.get('id')
-        if not op_id:
-            raise RuntimeError(f"No operation_id in Grok edit response: {data}")
         return op_id
 
     # ------------------------------------------------------------------
@@ -1062,12 +861,6 @@ class FastGenClient:
         prompt = self._load_remix_prompt('ref_remix_prompt.txt', self._DEFAULT_REF_REMIX)
         print(f"  {_YELLOW}[GPT IMAGE REMIX]{_RESET} {Path(image_path).name}")
         return self._v6_remix(image_path, output_path, prompt, 'openai_image_generate', poll_timeout=180)
-
-    def remix_i2v_grok(self, image_path: str, output_path: str) -> str:
-        """Ремикс i2v-кадра через Grok edit (V6 grok_image_edit). Промпт из i2v_remix_prompt.txt."""
-        prompt = self._load_remix_prompt('i2v_remix_prompt.txt', self._DEFAULT_I2V_REMIX)
-        print(f"  {_YELLOW}[GROK I2V REMIX]{_RESET} {Path(image_path).name}")
-        return self._v6_remix(image_path, output_path, prompt, 'grok_image_edit')
 
     def remix_i2v_flower(self, image_path: str, output_path: str, prompt: str) -> str:
         """Ремикс i2v-кадра через Flower img2img (V6 flower_image_edit)."""
@@ -1456,27 +1249,6 @@ class FastGenClient:
     # Сохранение изображения
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def save_image(data_uri: str, output_path: str):
-        """
-        Декодировать data:image/...;base64,... и сохранить в файл.
-
-        Args:
-            data_uri: Base64 data URI
-            output_path: Путь для сохранения
-        """
-        path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        if data_uri.startswith('data:'):
-            # data:image/png;base64,iVBOR...
-            header, b64data = data_uri.split(',', 1)
-        else:
-            b64data = data_uri
-
-        img_bytes = base64.b64decode(b64data)
-        write_bytes_atomic(path, img_bytes)
-
     # ------------------------------------------------------------------
     # Проверка квоты
     # ------------------------------------------------------------------
@@ -1500,211 +1272,6 @@ class FastGenClient:
             raise FastGenUsageError(f"Usage check failed ({resp.status_code}): {body}")
         return resp.json()
 
-    def get_flow_ultra_usage(self) -> Dict[str, int]:
-        """
-        Получить Flow Ultra-специфичные лимиты из /api/v2/usage.
-
-        Returns:
-            {
-                'hour_limit':      int,  # flow_ultra_hour_limit
-                'threads_allowed': int,  # flow_ultra_threads_allowed (для Spinbox Parallel)
-                'active_threads':  int,  # current flow_ultra_threads (используется сейчас)
-                'available':       bool, # True если threads_allowed > 0 (подписка активна)
-            }
-        """
-        usage = self.get_usage()
-        al = usage.get('account_limits', {}) or {}
-        cu = usage.get('current_usage', {}).get('active_threads', {}) or {}
-        threads_allowed = int(al.get('flow_ultra_threads_allowed', 0) or 0)
-        return {
-            'hour_limit':      int(al.get('flow_ultra_hour_limit', 0) or 0),
-            'threads_allowed': threads_allowed,
-            'active_threads':  int(cu.get('flow_ultra_threads', 0) or 0),
-            'available':       threads_allowed > 0,
-        }
-
-    # ------------------------------------------------------------------
-    # Flow Ultra — T2V (text-to-video) generation
-    # Endpoint: POST /api/v4/flow-ultra/video/from-text
-    # Result: {status:"success", result: ["data:video/mp4;base64,..."]}
-    # Typical gen time: ~90s per 5s clip
-    # ------------------------------------------------------------------
-
-    def generate_flow_ultra_t2v(
-        self,
-        prompt: str,
-        output_path: str,
-        aspect_ratio: str = "16:9",
-        quality: Optional[str] = None,
-        poll_interval: int = 5,
-        poll_timeout: int = 600,
-    ) -> str:
-        """
-        Сгенерировать видео text-to-video через FastGen Flow Ultra.
-        Длительность — фиксированная 8 секунд (зашита в Veo-модель, API игнорит custom duration).
-
-        Args:
-            prompt: текст-промпт
-            output_path: куда сохранить .mp4
-            aspect_ratio: '16:9' | '9:16' | '1:1'
-            quality: 'fast' | 'ultra' | None (дефолт)
-            poll_interval: опрос статуса каждые N секунд
-            poll_timeout: максимум времени ожидания (секунды)
-
-        Returns:
-            Путь к сохранённому файлу .mp4
-        """
-        import base64 as _b64
-
-        url = f"{self.base_url}/v4/flow-ultra/video/from-text"
-        body = {"prompt": prompt, "aspect_ratio": self._flow_ultra_aspect(aspect_ratio)}
-        if quality:
-            logging.warning("Flow Ultra v4 ignores unsupported quality=%r", quality)
-
-        # Skip if shutdown already requested
-        if _flowultra_shutdown_event.is_set():
-            raise GenerationError("flow-ultra: shutdown requested before submit")
-
-        resp = requests.post(url, headers=self.headers, json=body, timeout=60)
-        if resp.status_code != 200:
-            raise GenerationError(
-                f"flow-ultra submit failed ({resp.status_code}): {_clean_resp_text(resp.text)}"
-            )
-        data = resp.json()
-        if not data.get("success") or not data.get("operation_id"):
-            raise GenerationError(f"flow-ultra submit bad response: {str(data)[:300]}")
-        op_id = data["operation_id"]
-        logging.info(f"flow-ultra T2V submitted: operation_id={op_id}")
-
-        # Poll until done
-        deadline = time.time() + poll_timeout
-        while time.time() < deadline:
-            if _flowultra_shutdown_event.is_set():
-                raise GenerationError(f"flow-ultra: shutdown requested (op_id={op_id})")
-            if _flowultra_sleep_interruptible(poll_interval):
-                raise GenerationError(f"flow-ultra: shutdown requested (op_id={op_id})")
-            op_url = f"{self.base_url}/v4/operations/{op_id}"
-            try:
-                opr = requests.get(op_url, headers=self.headers, timeout=20)
-            except requests.exceptions.RequestException as _e:
-                logging.warning(f"flow-ultra poll error: {_e}")
-                continue
-            if opr.status_code != 200:
-                logging.warning(f"flow-ultra poll HTTP {opr.status_code}: {opr.text[:200]}")
-                continue
-            pdata = opr.json()
-            status = pdata.get("status")
-            if status == "success":
-                result = pdata.get("result") or []
-                if not result:
-                    raise GenerationError(f"flow-ultra succeeded but empty result: {pdata}")
-                # Result item: 'data:video/mp4;base64,...'
-                entry = result[0]
-                if isinstance(entry, str) and entry.startswith("data:"):
-                    b64 = entry.split(",", 1)[-1]
-                    video_bytes = _b64.b64decode(b64)
-                    out = Path(output_path)
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    write_bytes_atomic(out, video_bytes)
-                    logging.info(f"flow-ultra T2V done -> {output_path} ({len(video_bytes)//1024} KB)")
-                    return str(out)
-                # Fallback: URL?
-                if isinstance(entry, str) and entry.startswith("http"):
-                    r = requests.get(entry, timeout=(30, 300), stream=True)
-                    if r.status_code != 200:
-                        raise GenerationError(f"flow-ultra result URL fetch failed: {r.status_code}")
-                    out = Path(output_path)
-                    out.parent.mkdir(parents=True, exist_ok=True)
-                    with atomic_open(out) as f:
-                        for chunk in r.iter_content(8192):
-                            f.write(chunk)
-                    logging.info(f"flow-ultra T2V done -> {output_path} (via URL)")
-                    return str(out)
-                raise GenerationError(f"flow-ultra unknown result entry type: {str(entry)[:120]}")
-            if status in ("failed", "error"):
-                err = pdata.get("error") or str(pdata)[:300]
-                raise GenerationError(f"flow-ultra operation failed: {err}")
-            # still pending/processing — continue polling
-
-        raise GenerationError(f"flow-ultra polling timeout after {poll_timeout}s (op_id={op_id})")
-
-    # ------------------------------------------------------------------
-    # Flow Ultra — Ingredients (ref-image driven t2v) and Keyframes (start+end)
-    # ------------------------------------------------------------------
-
-    def _flow_ultra_submit_and_poll(
-        self,
-        endpoint_suffix: str,
-        body: dict,
-        output_path: str,
-        poll_interval: int = 5,
-        poll_timeout: int = 600,
-    ) -> str:
-        """Shared submit + poll + save helper for all flow-ultra video endpoints."""
-        import base64 as _b64
-
-        if _flowultra_shutdown_event.is_set():
-            raise GenerationError("flow-ultra: shutdown requested before submit")
-
-        url = f"{self.base_url}{endpoint_suffix}"
-        logging.info(f"flow-ultra submit endpoint={endpoint_suffix}")
-        resp = requests.post(url, headers=self.headers, json=body, timeout=60)
-        if resp.status_code != 200:
-            logging.error(
-                f"flow-ultra submit endpoint={endpoint_suffix} failed "
-                f"status={resp.status_code}: {_clean_resp_text(resp.text)}"
-            )
-            raise GenerationError(
-                f"flow-ultra submit failed endpoint={endpoint_suffix} "
-                f"({resp.status_code}): {_clean_resp_text(resp.text)}"
-            )
-        data = resp.json()
-        if not data.get("success") or not data.get("operation_id"):
-            raise GenerationError(f"flow-ultra submit bad response: {str(data)[:300]}")
-        op_id = data["operation_id"]
-        logging.info(f"flow-ultra submitted {endpoint_suffix}: operation_id={op_id}")
-
-        deadline = time.time() + poll_timeout
-        while time.time() < deadline:
-            if _flowultra_shutdown_event.is_set():
-                raise GenerationError(f"flow-ultra: shutdown requested (op_id={op_id})")
-            if _flowultra_sleep_interruptible(poll_interval):
-                raise GenerationError(f"flow-ultra: shutdown requested (op_id={op_id})")
-            try:
-                opr = requests.get(
-                    f"{self.base_url}/v4/operations/{op_id}",
-                    headers=self.headers, timeout=20,
-                )
-            except requests.exceptions.RequestException:
-                continue
-            if opr.status_code != 200:
-                continue
-            pdata = opr.json()
-            status = pdata.get("status")
-            if status == "success":
-                result = pdata.get("result") or []
-                if not result:
-                    raise GenerationError(f"flow-ultra empty result: {pdata}")
-                entry = result[0]
-                out = Path(output_path)
-                out.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(entry, str) and entry.startswith("data:"):
-                    write_bytes_atomic(out, _b64.b64decode(entry.split(",", 1)[-1]))
-                    return str(out)
-                if isinstance(entry, str) and entry.startswith("http"):
-                    r = requests.get(entry, timeout=(30, 300), stream=True)
-                    if r.status_code != 200:
-                        raise GenerationError(f"flow-ultra URL fetch failed: {r.status_code}")
-                    with atomic_open(out) as f:
-                        for chunk in r.iter_content(8192):
-                            f.write(chunk)
-                    return str(out)
-                raise GenerationError(f"flow-ultra unknown result entry: {str(entry)[:120]}")
-            if status in ("failed", "error"):
-                err = pdata.get("error") or str(pdata)[:300]
-                raise GenerationError(f"flow-ultra operation failed: {err}")
-        raise GenerationError(f"flow-ultra polling timeout after {poll_timeout}s (op_id={op_id})")
-
     @staticmethod
     def _image_to_b64_data_uri(path: str) -> str:
         """Load image file → 'data:image/<ext>;base64,...' data URI for API."""
@@ -1715,69 +1282,6 @@ class FastGenClient:
         mime = mime_map.get(ext, "jpeg")
         b64 = _b64.b64encode(p.read_bytes()).decode("ascii")
         return f"data:image/{mime};base64,{b64}"
-
-    @staticmethod
-    def _flow_ultra_aspect(aspect_ratio: str) -> str:
-        aliases = {
-            "landscape": "16:9",
-            "horizontal": "16:9",
-            "portrait": "9:16",
-            "vertical": "9:16",
-        }
-        value = aliases.get(str(aspect_ratio), str(aspect_ratio))
-        if value not in ("16:9", "9:16"):
-            raise GenerationError(f"Flow Ultra v4 supports aspect_ratio 16:9 or 9:16, got {aspect_ratio!r}")
-        return value
-
-    def generate_flow_ultra_ingredients(
-        self,
-        prompt: str,
-        reference_images: List[str],     # list of local image paths (1-3)
-        output_path: str,
-        aspect_ratio: str = "16:9",
-        seed: Optional[int] = None,
-        poll_interval: int = 5,
-        poll_timeout: int = 600,
-    ) -> str:
-        """Flow Ultra: video from text + 1-3 reference images (t2v with ref guidance)."""
-        if not reference_images:
-            raise GenerationError("ingredients requires at least 1 reference image")
-        if len(reference_images) > 3:
-            reference_images = reference_images[:3]
-        refs = [self._image_to_b64_data_uri(p) for p in reference_images]
-        body = {"prompt": prompt, "reference_images": refs, "aspect_ratio": self._flow_ultra_aspect(aspect_ratio)}
-        if seed is not None:
-            body["seed"] = int(seed)
-        return self._flow_ultra_submit_and_poll(
-            "/v4/flow-ultra/video/from-ingredients", body, output_path,
-            poll_interval=poll_interval, poll_timeout=poll_timeout,
-        )
-
-    def generate_flow_ultra_keyframes(
-        self,
-        prompt: str,
-        start_image: str,                # local path
-        output_path: str,
-        end_image: Optional[str] = None, # optional local path
-        aspect_ratio: str = "16:9",
-        seed: Optional[int] = None,
-        poll_interval: int = 5,
-        poll_timeout: int = 600,
-    ) -> str:
-        """Flow Ultra: video from start (+ optional end) keyframes (i2v / extend-like)."""
-        body = {
-            "prompt": prompt,
-            "start_image": self._image_to_b64_data_uri(start_image),
-            "aspect_ratio": self._flow_ultra_aspect(aspect_ratio),
-        }
-        if end_image:
-            body["end_image"] = self._image_to_b64_data_uri(end_image)
-        if seed is not None:
-            body["seed"] = int(seed)
-        return self._flow_ultra_submit_and_poll(
-            "/v4/flow-ultra/video/from-keyframes", body, output_path,
-            poll_interval=poll_interval, poll_timeout=poll_timeout,
-        )
 
     def cancel_all_tasks(self) -> dict:
         """

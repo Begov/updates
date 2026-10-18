@@ -45,53 +45,6 @@ def find_prompts_file(directory: str = ".") -> str:
     return None
 
 
-def extract_prompt(fragment_id: int, file_path: str = None) -> str:
-    """
-    Извлекает промпт для указанного фрагмента
-
-    Args:
-        fragment_id: Номер фрагмента (1-based)
-        file_path: Путь к файлу промптов (если None - ищется автоматически)
-
-    Returns:
-        Текст промпта или сообщение об ошибке
-    """
-    try:
-        # Если путь не указан - ищем файл
-        if file_path is None:
-            file_path = find_prompts_file()
-            if file_path is None:
-                return "❌ Не найден файл промптов (*_prompts_*.txt) в текущей директории"
-        
-        # Пробуем разные кодировки
-        content = None
-        for encoding in ['utf-8', 'cp1251', 'latin-1']:
-            try:
-                with open(file_path, 'r', encoding=encoding) as f:
-                    content = f.read()
-                break
-            except UnicodeDecodeError:
-                continue
-        
-        if content is None:
-            return f"❌ Не удалось прочитать файл {file_path} (неподдерживаемая кодировка)"
-
-        # Разделяем промпты по ОДНОЙ пустой строке
-        # Формат: промпт1\n\nпромпт2\n\nпромпт3
-        prompts = re.split(r'\n\n+', content.strip())
-        
-        # fragment_id начинается с 1, массив с 0
-        if 1 <= fragment_id <= len(prompts):
-            return prompts[fragment_id - 1].strip()
-        else:
-            return f"❌ Промпт для фрагмента #{fragment_id} не найден (всего промптов: {len(prompts)})"
-
-    except FileNotFoundError:
-        return f"❌ Файл {file_path} не найден"
-    except Exception as e:
-        return f"❌ Ошибка: {e}"
-
-
 def extract_all_prompts(file_path: str = None) -> dict:
     """
     Извлекает все промпты из файла
