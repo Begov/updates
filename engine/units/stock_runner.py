@@ -108,26 +108,14 @@ def _match_local_by_words(queries: List[Any], items: List[StockResult], root: Pa
 
 
 def _release_pending(clips, *, why: str = "") -> str:
-    """Снять маркер `stock_pending` — с оглядкой на режим.
-
-    Обычный режим: маркера нет → клип берёт обычная генерация (или Pre-concat
-    fallback). Режим «только не-AI»: генерации НЕТ, и осиротевшая сцена дожила
-    бы до склейки пустой — поэтому передаём её архивам (`real_photo_pending`),
-    единственному пути, который в этом режиме работает (улов прогона 26.08).
+    """Снять маркер `stock_pending`: клип берёт обычная генерация (или Pre-concat fallback).
 
     Возвращает, куда ушли клипы, — для честного текста в отчёте.
     """
-    from units.real_source_policy import enabled as _non_ai_enabled
-
-    non_ai = _non_ai_enabled()
     for clip in clips:
-        if clip.get('source') != 'stock_pending':
-            continue
-        if non_ai:
-            clip['source'] = 'real_photo_pending'
-        else:
+        if clip.get('source') == 'stock_pending':
             clip.pop('source', None)
-    where = 'АРХИВЫ (EPF/Wikipedia)' if non_ai else _fallback_word().upper()
+    where = _fallback_word().upper()
     if why:
         logger.warning("[stock] %s — %d клип(ов) в %s", why, len(clips), where)
     return where

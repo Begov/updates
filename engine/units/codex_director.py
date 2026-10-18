@@ -1523,13 +1523,6 @@ class GptDirector:
             json.dumps(montage_plan, indent=2, ensure_ascii=False),
             encoding='utf-8'
         )
-        from units.real_source_policy import (
-            apply_policy as apply_non_ai_policy,
-            enabled as non_ai_enabled,
-        )
-        if non_ai_enabled():
-            apply_non_ai_policy(mp_path)
-            montage_plan = json.loads(mp_path.read_text(encoding='utf-8-sig'))
         # «Состав видео» — предпочтение: разметку сводим с долями ДО Pass 2,
         # чтобы промпты писались уже под итоговые метки (см. source_quota.py).
         try:

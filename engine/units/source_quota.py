@@ -188,13 +188,6 @@ def enforce_source_mix(montage_path: str | Path, transcription: Optional[Dict[st
     summary: Dict[str, Any] = {'changed': False}
     if not targets or not path.exists():
         return summary
-    try:
-        from units.real_source_policy import enabled as non_ai_enabled
-        if non_ai_enabled():
-            return summary                  # у режима «только не-AI» своё распределение
-    except Exception:                       # noqa: BLE001
-        pass
-
     raw = json.loads(path.read_text(encoding='utf-8-sig'))
     plan = raw.get('montage_plan', raw) if isinstance(raw, dict) else raw
     clips = [c for c in (plan.get('clips') or []) if str(c.get('id', '')).lstrip('-').isdigit()]

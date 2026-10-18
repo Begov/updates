@@ -570,21 +570,6 @@ def _run_post_pipeline_silent(
     """
     if not action:
         return
-    from units.real_source_policy import (
-        apply_policy as _apply_non_ai_policy,
-        enabled as _non_ai_enabled,
-        protect_unresolved as _protect_non_ai,
-    )
-    _non_ai_mode = _non_ai_enabled()
-    if _non_ai_mode:
-        plan_path = Path(project_dir) / 'montage_plan.json'
-        try:
-            _apply_non_ai_policy(plan_path)
-        except Exception as exc:
-            print(f"  [Non-AI] configuration error: {exc}")
-            return
-        print("  [Non-AI] ordinary ImageGen/VideoGen disabled; external/static routes only")
-        action = 'skip'
     if action == 'skip':
         external_stages_enabled = any(
             os.environ.get(key, '').lower() in ('1', 'true', 'yes', 'on')
@@ -954,64 +939,57 @@ def _run_post_pipeline_silent(
         if _stock_thread is None:
             return
         if _stock_thread.is_alive():
-            if _non_ai_mode:
-                _stock_wait = max(
-                    1, int(getattr(config, 'STOCK_WAIT_TIMEOUT', 1800)))
-                print(f"  [Stock] {label}: Non-AI mode, waiting up to {_stock_wait}s")
-                _stock_thread.join(timeout=_stock_wait)
-            else:
-                # Сначала ДАЁМ стоку доработать, как ютубу (задание 28.08).
-                # Раньше стоп прилетал мгновенно: на короткой генерации стадия
-                # не успевала пройти очередь, и хвост клипов уходил в
-                # нейрогенерацию с причиной «не дошла очередь» (прогон 28.08,
-                # клипы 34 и 36). 1800с из STOCK_WAIT_TIMEOUT тут не работали —
-                # они только для non-AI режима, что видно веткой выше.
-                # СТОРОЖ ТИШИНЫ, а не глухой отсчёт (решение пользователя
-                # 01.09). Прежние 500 с отсчитывались от конца генерации — и
-                # это неверный якорь: когда всё размечено на сток, генерации
-                # нет вовсе, она «заканчивается» мгновенно и тут же запускает
-                # стоку обратный отсчёт. На часовом ролике сток получил бы 500
-                # секунд на сотни сцен, а остальное свалилось бы в
-                # нейрогенерацию. Уже на 14 клипах прогон cheese5 потерял так
-                # клип 3 с причиной «не дошла очередь».
-                #
-                # Теперь ждём, ПОКА СТАДИЯ РАБОТАЕТ: каждая закрытая сцена
-                # продлевает ожидание. Обрываем только по тишине — когда за
-                # `STOCK_IDLE_TIMEOUT` не закрылось ни одной. Старый ключ
-                # остаётся ВЕРХНИМ пределом на клинический случай.
-                _idle_limit = max(60, int(getattr(
-                    config, 'STOCK_IDLE_TIMEOUT', 300)))
-                _hard_limit = max(0, int(getattr(
-                    config, 'STOCK_PIPELINE_WAIT_TIMEOUT', 500)))
-                if _stock_thread.is_alive():
-                    print(f"  [Stock] {label}: остальные стадии готовы; жду, пока "
-                          f"сток закрывает сцены (обрыв только после {_idle_limit}с "
-                          f"без единой новой)")
-                    _started = time.time()
-                    _last_change = time.time()
-                    _seen = _stage_media_count(project_dir)
-                    while _stock_thread.is_alive():
-                        _stock_thread.join(timeout=15)
-                        _now = _stage_media_count(project_dir)
-                        if _now != _seen:
-                            _seen = _now
-                            _last_change = time.time()
-                            continue
-                        _quiet = time.time() - _last_change
-                        if _quiet >= _idle_limit:
-                            print(f"  [Stock] {label}: тишина {int(_quiet)}с — "
-                                  f"стадия больше ничего не закрывает, останавливаю")
-                            break
-                        if _hard_limit and (time.time() - _started) >= _hard_limit * 10:
-                            print(f"  [Stock] {label}: верхний предел "
-                                  f"{_hard_limit * 10}с исчерпан, останавливаю")
-                            break
-                if _stock_thread.is_alive():
-                    from units.source_quota import ai_allowed as _ws_ai
-                    print(f"  [Stock] {label}: стоп загрузку (недокачанные → "
-                          + ("догенерация по промпту)" if _ws_ai() else "запасной путь без нейрогенерации)"))
-                    _real_photo_stop.set()
-                    _stock_thread.join(timeout=120)   # грейс на завершение текущего клипа
+            # Сначала ДАЁМ стоку доработать, как ютубу (задание 28.08).
+            # Раньше стоп прилетал мгновенно: на короткой генерации стадия
+            # не успевала пройти очередь, и хвост клипов уходил в
+            # нейрогенерацию с причиной «не дошла очередь» (прогон 28.08,
+            # клипы 34 и 36).
+            # СТОРОЖ ТИШИНЫ, а не глухой отсчёт (решение пользователя
+            # 01.09). Прежние 500 с отсчитывались от конца генерации — и
+            # это неверный якорь: когда всё размечено на сток, генерации
+            # нет вовсе, она «заканчивается» мгновенно и тут же запускает
+            # стоку обратный отсчёт. На часовом ролике сток получил бы 500
+            # секунд на сотни сцен, а остальное свалилось бы в
+            # нейрогенерацию. Уже на 14 клипах прогон cheese5 потерял так
+            # клип 3 с причиной «не дошла очередь».
+            #
+            # Теперь ждём, ПОКА СТАДИЯ РАБОТАЕТ: каждая закрытая сцена
+            # продлевает ожидание. Обрываем только по тишине — когда за
+            # `STOCK_IDLE_TIMEOUT` не закрылось ни одной. Старый ключ
+            # остаётся ВЕРХНИМ пределом на клинический случай.
+            _idle_limit = max(60, int(getattr(
+                config, 'STOCK_IDLE_TIMEOUT', 300)))
+            _hard_limit = max(0, int(getattr(
+                config, 'STOCK_PIPELINE_WAIT_TIMEOUT', 500)))
+            if _stock_thread.is_alive():
+                print(f"  [Stock] {label}: остальные стадии готовы; жду, пока "
+                      f"сток закрывает сцены (обрыв только после {_idle_limit}с "
+                      f"без единой новой)")
+                _started = time.time()
+                _last_change = time.time()
+                _seen = _stage_media_count(project_dir)
+                while _stock_thread.is_alive():
+                    _stock_thread.join(timeout=15)
+                    _now = _stage_media_count(project_dir)
+                    if _now != _seen:
+                        _seen = _now
+                        _last_change = time.time()
+                        continue
+                    _quiet = time.time() - _last_change
+                    if _quiet >= _idle_limit:
+                        print(f"  [Stock] {label}: тишина {int(_quiet)}с — "
+                              f"стадия больше ничего не закрывает, останавливаю")
+                        break
+                    if _hard_limit and (time.time() - _started) >= _hard_limit * 10:
+                        print(f"  [Stock] {label}: верхний предел "
+                              f"{_hard_limit * 10}с исчерпан, останавливаю")
+                        break
+            if _stock_thread.is_alive():
+                from units.source_quota import ai_allowed as _ws_ai
+                print(f"  [Stock] {label}: стоп загрузку (недокачанные → "
+                      + ("догенерация по промпту)" if _ws_ai() else "запасной путь без нейрогенерации)"))
+                _real_photo_stop.set()
+                _stock_thread.join(timeout=120)   # грейс на завершение текущего клипа
             if _stock_thread.is_alive():
                 print("  [Stock] wait expired; unresolved clips remain non-AI pending")
                 _real_photo_stop.set()
@@ -1066,9 +1044,8 @@ def _run_post_pipeline_silent(
             _rp_tail_wait = max(0, int(
                 getattr(
                     config,
-                    'REAL_PHOTO_WAIT_TIMEOUT' if _non_ai_mode
-                    else 'REAL_PHOTO_PIPELINE_WAIT_TIMEOUT',
-                    1800 if _non_ai_mode else 100,
+                    'REAL_PHOTO_PIPELINE_WAIT_TIMEOUT',
+                    100,
                 )
             ))
             # Сторож тишины (как у стока и ютуба). Прежние 100 секунд были
@@ -1078,8 +1055,7 @@ def _run_post_pipeline_silent(
             _rp_idle = max(60, int(getattr(config, 'REAL_PHOTO_IDLE_TIMEOUT', 300)))
             _rp_hard = _rp_tail_wait * 10 if _rp_tail_wait else 0
             print(f"  [Real Photo] {label}: жду, пока EPF закрывает кадры "
-                  f"(обрыв после {_rp_idle}с тишины)"
-                  f"{' [Non-AI mode]' if _non_ai_mode else ''}")
+                  f"(обрыв после {_rp_idle}с тишины)")
             _rp_started = time.time()
             _rp_last = time.time()
             _rp_seen = _stage_media_count(project_dir)
@@ -2159,9 +2135,8 @@ def _run_post_pipeline_silent(
         # Промпт уже есть из Pass 2 (промпты пишутся и для помеченных клипов).
         # Вход по ОБОИМ флагам: раньше висел только на REAL_PHOTO_PROMPT_FALLBACK — выключи
         # его юзер, и недокачанные сток-клипы остались бы помеченными → дырки в ролике.
-        if (not _non_ai_mode and (
-                getattr(config, 'REAL_PHOTO_PROMPT_FALLBACK', True)
-                or getattr(config, 'STOCK_PROMPT_FALLBACK', True))):
+        if (getattr(config, 'REAL_PHOTO_PROMPT_FALLBACK', True)
+                or getattr(config, 'STOCK_PROMPT_FALLBACK', True)):
             try:
                 import json as _rpj
                 _mp_path = Path(project_dir) / 'montage_plan.json'
@@ -2368,8 +2343,6 @@ def _run_post_pipeline_silent(
             except Exception as _fe:
                 print(f"  [Pre-concat fallback] пропущен: {_fe}")
                 logging.debug(traceback.format_exc())
-        elif _non_ai_mode:
-            _protect_non_ai(Path(project_dir) / 'montage_plan.json')
 
     # ── Параллакс готовым фото (сток / архивы), стандартный режим ───────────
     # Нейрокадры получают параллакс внутри обычного i2v, а сток и архивные фото

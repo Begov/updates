@@ -309,16 +309,6 @@ def apply_intro_gate(montage_path, sources, start_sec: float, *,
 
     import logging
 
-    try:
-        from units.real_source_policy import enabled as non_ai_enabled
-        if non_ai_enabled():
-            return []
-    except Exception as exc:                     # noqa: BLE001
-        # Молчать нельзя: не узнав про режим «только не-AI», гейт снимет маркеры
-        # и отдаст клипы обычной генерации — ровно то, что этот режим запрещает.
-        logging.warning("  [%s] режим не-AI не проверен (%s) — гейт работает как обычно",
-                        label, exc)
-
     if start_sec is None or float(start_sec) <= 0:
         return []
     # Гейт отдаёт вступление нейрогенерации. Если она запрещена (доля 0 или
