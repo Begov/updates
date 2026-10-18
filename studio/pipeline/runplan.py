@@ -67,7 +67,6 @@ def stage_env(v: dict) -> dict:
     m["REAL_PHOTO_ENABLED"] = "false"
     m["REAL_PHOTO_EPF_BRIDGE"] = "0"
     m["NON_AI_IMAGE_MODE"] = "false"
-    m["ENTITY_OVERLAY_ENABLED"] = "false"
     m["ATTRIBUTION_OVERLAY"] = "false"
     m["BEGO_LIVE_ANIMATE"] = "1" if v.get("video_live_animate") else "0"
     m["VIDEO_LIVE_ANIMATE"] = m["BEGO_LIVE_ANIMATE"]

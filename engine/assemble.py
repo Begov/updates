@@ -991,225 +991,6 @@ _PAN_FRACTIONS = {
 ZOOM_STYLES = [f"{d}-{p}" for d in ('in', 'out') for p in _PAN_FRACTIONS]
 
 
-def _append_entity_overlays_to_graph(
-    input_args,
-    filter_parts,
-    current_label,
-    next_input_index,
-    entity_overlays,
-    target_duration,
-    work_dir,
-    prefix,
-    generated_frame_files=None,
-):
-    """Add entity cards to the current per-clip filter graph."""
-    if not entity_overlays:
-        return input_args, filter_parts, current_label, next_input_index
-    try:
-        _agent_dir = Path(__file__).resolve().parent / 'agent'
-        if str(_agent_dir) not in sys.path:
-            sys.path.insert(0, str(_agent_dir))
-        from units.entity_cards import render_entity_card_sequence
-    except Exception as exc:
-        raise RuntimeError(f"Entity per-clip renderer unavailable: {exc}") from exc
-
-    work_dir = Path(work_dir)
-    work_dir.mkdir(parents=True, exist_ok=True)
-    safe_prefix = ''.join(c if c.isalnum() or c in '-_' else '_' for c in str(prefix))
-    for order, slot in enumerate(entity_overlays, start=1):
-        card_path = Path(str(slot.get('path') or ''))
-        if not card_path.is_file():
-            continue
-        start = max(0.0, float(slot.get('start', 0.0) or 0.0))
-        end = min(float(target_duration), float(slot.get('end', start) or start))
-        if end <= start + 0.05:
-            continue
-        duration = end - start
-        frame_prefix = f"{safe_prefix}_{order:02d}"
-        try:
-            pattern = render_entity_card_sequence(
-                card_path,
-                work_dir,
-                duration,
-                fps=30,
-                prefix=frame_prefix,
-            )
-        except Exception:
-            for partial_frame in work_dir.glob(f"{frame_prefix}_*.png"):
-                try:
-                    partial_frame.unlink()
-                except Exception:
-                    pass
-            if generated_frame_files is not None:
-                _cleanup_entity_frame_files(generated_frame_files)
-                generated_frame_files.clear()
-            raise
-        if generated_frame_files is not None:
-            generated_frame_files.extend(work_dir.glob(f"{frame_prefix}_*.png"))
-        input_idx = next_input_index
-        next_input_index += 1
-        input_args.extend(['-framerate', '30', '-i', str(pattern)])
-        card_label = f"entity_card_{input_idx}"
-        out_label = f"entity_base_{input_idx}"
-        y_expr = "(H-h)*0.22" if str(slot.get('kind') or '').lower() == 'place' else "(H-h)*0.40"
-        filter_parts.append(
-            f"[{input_idx}:v]format=rgba,"
-            f"setpts=PTS-STARTPTS+{start:.6f}/TB[{card_label}]"
-        )
-        filter_parts.append(
-            f"[{current_label}][{card_label}]overlay=x=(W-w)/2:y={y_expr}:"
-            f"eof_action=pass:repeatlast=0:"
-            f"enable='between(t,{start:.6f},{end:.6f})'[{out_label}]"
-        )
-        current_label = out_label
-    return input_args, filter_parts, current_label, next_input_index
-
-
-def _cleanup_entity_frame_files(frame_files):
-    parents = set()
-    for frame_file in frame_files or []:
-        path = Path(frame_file)
-        parents.add(path.parent)
-        try:
-            path.unlink()
-        except Exception:
-            pass
-    for parent in parents:
-        try:
-            parent.rmdir()
-        except Exception:
-            pass
-
-
-def _entity_overlays_enabled(args) -> bool:
-    enabled = getattr(args, 'entity_overlays', None)
-    if enabled is None:
-        enabled = str(os.environ.get('ENTITY_OVERLAY_ENABLED', '')).lower() in (
-            'true', '1', 'yes', 'on')
-    return bool(enabled)
-
-
-def _entity_render_size(resolution, auto_target_1080=False):
-    resolution = str(resolution or '').strip().lower()
-    if resolution in ('4k', '2160'):
-        return oriented(3840, 2160)
-    if resolution == '1080' or auto_target_1080:
-        return oriented(1920, 1080)
-    return oriented(1280, 720)
-
-
-def _load_entity_overlay_slots(args, size):
-    _agent_dir = Path(__file__).resolve().parent / 'agent'
-    if str(_agent_dir) not in sys.path:
-        sys.path.insert(0, str(_agent_dir))
-    from units.entity_cards import plan_and_render_entity_overlays
-
-    try:
-        import params as _ent_cfg
-        _ent_cfg.ENTITY_OVERLAY_ENABLED = True
-    except Exception:
-        pass
-
-    raw_max = (
-        args.max_entity_overlays
-        if getattr(args, 'max_entity_overlays', None) is not None
-        else os.environ.get('ENTITY_OVERLAY_MAX', '20')
-    )
-    raw_max_text = str(raw_max).strip().lower()
-    if not raw_max_text:
-        raw_max_text = '20'
-    max_overlays = 0 if raw_max_text in ('0', 'all', 'auto', 'max') else int(raw_max_text)
-    hold_sec = (
-        args.entity_overlay_sec
-        if getattr(args, 'entity_overlay_sec', None) is not None
-        else float(os.environ.get('ENTITY_OVERLAY_HOLD_SEC', '4.2') or 4.2)
-    )
-    backend = (
-        getattr(args, 'entity_overlay_backend', None)
-        or os.environ.get('ENTITY_OVERLAY_BACKEND', 'auto')
-    )
-    allow_download = str(os.environ.get('ENTITY_OVERLAY_CONCAT_DOWNLOAD', '')).lower() in (
-        '1', 'true', 'yes', 'on')
-    return plan_and_render_entity_overlays(
-        project_dir=Path(args.plan).resolve().parent,
-        size=size,
-        max_overlays=max(0, int(max_overlays)),
-        backend=str(backend).strip().lower(),
-        hold_sec=float(hold_sec or 4.2),
-        no_cache=False,
-        cache_only=not allow_download,
-    )
-
-
-def _bind_entity_overlays_to_clips(entity_slots, clips):
-    """Clamp every global entity slot to one corrected montage clip."""
-    normalized = []
-    by_clip = {}
-    ordered_clips = sorted(
-        clips,
-        key=lambda c: (float(c.get('startTime', 0.0)), float(c.get('endTime', 0.0))),
-    )
-    for index, slot in enumerate(entity_slots or [], start=1):
-        card_path = Path(str(slot.get('path') or ''))
-        if not card_path.is_file():
-            continue
-        start = max(0.0, float(slot.get('start', 0.0) or 0.0))
-        end = max(start + 0.2, float(slot.get('end', start + 0.2) or (start + 0.2)))
-        selected = next(
-            (
-                clip for clip in ordered_clips
-                if float(clip.get('startTime', 0.0)) - 1e-6
-                <= start
-                < float(clip.get('endTime', 0.0)) - 1e-6
-            ),
-            None,
-        )
-        if selected is None:
-            selected = next(
-                (
-                    clip for clip in ordered_clips
-                    if min(end, float(clip.get('endTime', 0.0)))
-                    - max(start, float(clip.get('startTime', 0.0))) > 0.05
-                ),
-                None,
-            )
-
-        item = dict(slot)
-        item['_entity_uid'] = index
-        if selected is not None:
-            clip_start = float(selected.get('startTime', 0.0))
-            clip_end = float(selected.get('endTime', 0.0))
-            clip_duration = max(0.0, clip_end - clip_start)
-            duration = min(end - start, clip_duration)
-            if duration > 0.05:
-                start = min(max(start, clip_start), clip_end - duration)
-                end = start + duration
-                item['start'] = start
-                item['end'] = end
-                item['_entity_clip_id'] = selected.get('id')
-                by_clip.setdefault(selected.get('id'), []).append(item)
-        normalized.append(item)
-    return normalized, by_clip
-
-
-def _localize_entity_overlays(entity_slots, clip_output_start, target_duration):
-    """Translate global timeline slots to the already drift-corrected clip timeline."""
-    localized = []
-    clip_output_end = float(clip_output_start) + float(target_duration)
-    for slot in entity_slots or []:
-        global_start = float(slot.get('start', 0.0) or 0.0)
-        global_end = float(slot.get('end', global_start) or global_start)
-        visible_start = max(global_start, float(clip_output_start))
-        visible_end = min(global_end, clip_output_end)
-        if visible_end <= visible_start + 0.05:
-            continue
-        item = dict(slot)
-        item['start'] = visible_start - float(clip_output_start)
-        item['end'] = visible_end - float(clip_output_start)
-        localized.append(item)
-    return localized
-
-
 def _parse_zoom_style(style):
     style = (style or 'in-center').strip().lower()
     direction, _, pan = style.partition('-')
@@ -1340,7 +1121,7 @@ def _image_to_zoom_video(input_file, output_file, target_duration, encoder_type,
                          logo_path=None, fps=60, keep_audio=False,
                          credit_text=None, blur_fill=False, upscale_1080=False, upscale_4k=False,
                          zoom_style='in-center', fade_in=False, fade_out=False, transition_duration=0.5,
-                         entity_overlays=None, static_no_motion=False, target_size=None):
+                         static_no_motion=False, target_size=None):
     """
     Конвертирует изображение в видео с медленным зумом (Ken Burns effect).
     Зум: 100% → 110% за target_duration секунд. zoom_style — направление+панорама (см. ZOOM_STYLES).
@@ -1503,18 +1284,6 @@ def _image_to_zoom_video(input_file, output_file, target_duration, encoder_type,
     # Dip-to-X переходы: клип сохраняет полную target_duration — native fade или xfade против
     # синтетического цветного клипа (wipe/slide/dissolve/...), время НЕ съедается. Без fade — no-op.
     _cur_label = 'zoomed'
-    _entity_frame_files = []
-    input_args, _fparts, _cur_label, _next_idx = _append_entity_overlays_to_graph(
-        input_args,
-        _fparts,
-        _cur_label,
-        _next_idx,
-        entity_overlays,
-        target_duration,
-        output_path.parent / '_entity_card_frames',
-        output_path.stem,
-        generated_frame_files=_entity_frame_files,
-    )
 
     _tb = _TransitionGraphBuilder(_next_idx, fps)
     _cur_label = _tb.apply(_cur_label, fade_in, 'in', target_duration, transition_duration)
@@ -1557,7 +1326,6 @@ def _image_to_zoom_video(input_file, output_file, target_duration, encoder_type,
         else:
             logger.info(f"Зум-видео готово: {output_file}")
     finally:
-        _cleanup_entity_frame_files(_entity_frame_files)
         if normalized_path is not None:
             _remove_file_safely(normalized_path)
 
@@ -1606,7 +1374,7 @@ def process_video(input_file, output_file, target_duration, encoder_type, codec,
                    logo_path=None, blur_borders=False, keep_audio=False, upscale_1080=False, fps=60,
                    is_chain_extend=False, real_photo_meta=None, upscale_4k=False,
                    zoom_style='in-center', fade_in=False, fade_out=False, transition_duration=0.5,
-                   entity_overlays=None, static_no_motion=False, target_size=None):
+                   static_no_motion=False, target_size=None):
     """Обрабатывает видео с ретаймингом до нужной длительности + точная обрезка.
     Если input_file — изображение, создаёт зум-видео нужной длины (zoom_style — см. ZOOM_STYLES).
     keep_audio=True  — сохраняет VEO аудио в ретаймленном фрагменте (для script-mode без нарации).
@@ -1633,7 +1401,6 @@ def process_video(input_file, output_file, target_duration, encoder_type, codec,
                                  zoom_style=zoom_style,
                                  fade_in=fade_in, fade_out=fade_out,
                                  transition_duration=transition_duration,
-                                 entity_overlays=entity_overlays,
                                  static_no_motion=static_no_motion,
                                  target_size=target_size)
             rendered_duration = get_video_duration(output_file)
@@ -1738,18 +1505,6 @@ def process_video(input_file, output_file, target_duration, encoder_type, codec,
             _fparts.append(f"[{_cur_label}][1:v]overlay=W-w-4:H-h-4[logoed]")
             _cur_label = "logoed"
 
-        _entity_frame_files = []
-        input_args, _fparts, _cur_label, _next_idx = _append_entity_overlays_to_graph(
-            input_args,
-            _fparts,
-            _cur_label,
-            _next_idx,
-            entity_overlays,
-            target_duration,
-            output_path.parent / '_entity_card_frames',
-            output_path.stem,
-            generated_frame_files=_entity_frame_files,
-        )
 
         # Dip-to-X переход на границе клипа (native fade или xfade против синтетического клипа).
         # Без fade_in/fade_out — no-op (граф не добавляет ничего, поведение как раньше).
@@ -1768,10 +1523,7 @@ def process_video(input_file, output_file, target_duration, encoder_type, codec,
                '-t', f'{target_duration:.6f}',
                '-r', str(fps)] + encoder_params + [str(temp_output)]
 
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, **SUBPROCESS_FLAGS)
-        finally:
-            _cleanup_entity_frame_files(_entity_frame_files)
+        subprocess.run(cmd, check=True, capture_output=True, **SUBPROCESS_FLAGS)
 
         # Переименовываем temp → final
         if output_path.exists():
@@ -1978,7 +1730,7 @@ def _render_still_fallback(
     input_file, output_file, target_duration, encoder_type, codec, bitrate, *,
     logo_path=None, fps=60, keep_audio=False, credit_text=None, blur_fill=False,
     upscale_1080=False, upscale_4k=False, fade_in=False, fade_out=False,
-    transition_duration=0.5, zoom_style='in-center', entity_overlays=None,
+    transition_duration=0.5, zoom_style='in-center',
     static_no_motion=False, target_size=None,
 ):
     try:
@@ -1990,7 +1742,7 @@ def _render_still_fallback(
             upscale_1080=upscale_1080, upscale_4k=upscale_4k,
             fade_in=fade_in, fade_out=fade_out,
             transition_duration=transition_duration, zoom_style=zoom_style,
-            entity_overlays=entity_overlays, static_no_motion=static_no_motion,
+            static_no_motion=static_no_motion,
             target_size=target_size,
         )
         rendered_duration = get_video_duration(output_file)
@@ -2028,7 +1780,7 @@ def _render_neighbor_hold(
     source_file, output_file, target_duration, encoder_type, codec, bitrate, *,
     use_last_frame, logo_path=None, fps=60, keep_audio=False,
     upscale_1080=False, upscale_4k=False, fade_in=False, fade_out=False,
-    transition_duration=0.5, entity_overlays=None, target_size=None,
+    transition_duration=0.5, target_size=None,
 ):
     """Render one nearby frame for a failed clip without changing its duration."""
     source_path = Path(source_file)
@@ -2039,7 +1791,7 @@ def _render_neighbor_hold(
             upscale_1080=upscale_1080, upscale_4k=upscale_4k,
             fade_in=fade_in, fade_out=fade_out,
             transition_duration=transition_duration,
-            entity_overlays=entity_overlays, static_no_motion=True,
+            static_no_motion=True,
             target_size=target_size,
         )
 
@@ -2062,7 +1814,7 @@ def _render_neighbor_hold(
             upscale_1080=upscale_1080, upscale_4k=upscale_4k,
             fade_in=fade_in, fade_out=fade_out,
             transition_duration=transition_duration,
-            entity_overlays=entity_overlays, static_no_motion=True,
+            static_no_motion=True,
             target_size=target_size,
         )
     except Exception as exc:
@@ -2465,16 +2217,6 @@ def main():
     parser.add_argument('-o', '--output', default='result.mp4', help='Выходной файл')
     parser.add_argument('-a', '--audio', default=None, help='Аудио озвучка (по умолчанию ищется любой .wav/.mp3 файл)')
     parser.add_argument('-b', '--bitrate', default='10M', help='Битрейт видео')
-    parser.add_argument('--entity-overlays', dest='entity_overlays', action='store_true', default=None,
-                        help='Карточки персон/мест (Wikipedia) поверх видео')
-    parser.add_argument('--no-entity-overlays', dest='entity_overlays', action='store_false',
-                        help='Отключить entity-карточки')
-    parser.add_argument('--entity-overlay-backend', default=None,
-                        help='Детектор сущностей: auto | gpt | regex')
-    parser.add_argument('--max-entity-overlays', type=int, default=None,
-                        help='Максимум карточек (0 = без лимита)')
-    parser.add_argument('--entity-overlay-sec', type=float, default=None,
-                        help='Длительность показа карточки (сек)')
     parser.add_argument('--attribution', dest='attribution', action='store_true', default=None,
                         help='Плашка источника на кадре («Wikimedia», «Google Images»). '
                              'По умолчанию ВЫКЛЮЧЕНА — надпись портит продакшн-качество; '
@@ -2851,8 +2593,7 @@ def main():
         if _zoom_style_pool != ['in-center']:
             logger.info(f"zoom: стиль(и)={_zoom_style_pool}")
 
-        # Определяем общий размер до проверки processed-кэша: Entity-карточка должна
-        # быть отрисована в том же масштабе, что и клип, в который она запекается.
+        # Определяем общий размер кадра до проверки processed-кэша.
         _max_prescan_h = 0
         _vid_img_prescan = Path('vid_img')
         if _vid_img_prescan.exists():
@@ -2875,36 +2616,6 @@ def main():
         print(f"\n[FORMAT] Целевой кадр: {_target_w}x{_target_h}"
               + (f" (выбрано: {args.resolution})" if args.resolution
                  else f" (по исходникам: {_max_prescan_h}px)"))
-
-        # Entity-карточки загружаются ДО ретайминга и распределяются по конкретным
-        # клипам. Эти клипы принудительно пересобираются, иначе старый processed-файл
-        # без карточки мог бы ошибочно пройти проверку кэша.
-        _entity_on = _entity_overlays_enabled(args)
-        _entity_size = (_target_w, _target_h)
-        _entity_slots = []
-        _entity_slots_by_clip = {}
-        _entity_baked_uids = set()
-        _entity_force_clip_ids = set()
-        if _entity_on:
-            try:
-                logger.info("Entity: loading cards before per-clip retiming")
-                _entity_raw_slots = _load_entity_overlay_slots(args, _entity_size)
-                _entity_slots, _entity_slots_by_clip = _bind_entity_overlays_to_clips(
-                    _entity_raw_slots, corrected_clips)
-                _entity_force_clip_ids = set(_entity_slots_by_clip)
-                logger.info(
-                    f"Entity: {len(_entity_slots)} card(s), "
-                    f"{len(_entity_force_clip_ids)} clip(s) forced for bake-in")
-                if _entity_slots:
-                    print(
-                        f"\n🧩 Entity: {len(_entity_slots)} карточек будут запечены "
-                        f"в {len(_entity_force_clip_ids)} монтажных клипов")
-            except Exception as _entity_prepare_error:
-                logger.error(f"Entity pre-retime preparation failed: {_entity_prepare_error}")
-                logger.error(traceback.format_exc())
-                print(
-                    f"\n⚠️  Entity: не удалось подготовить карточки до ретайминга "
-                    f"({_entity_prepare_error}); в конце сработает резервный режим")
 
         # ЭТАП 3: ПРОВЕРКА СУЩЕСТВУЮЩИХ ФАЙЛОВ
         logger.info("ЭТАП 3: ПРОВЕРКА СУЩЕСТВУЮЩИХ ФАЙЛОВ")
@@ -2935,8 +2646,6 @@ def main():
 
             def _probe_one(clip):
                 clip_id = clip['id']
-                if clip_id in _entity_force_clip_ids:
-                    return (clip_id, None, "entity overlay requires per-clip bake-in")
                 target_duration = clip['endTime'] - clip['startTime']
                 output_file = temp_dir / f"processed_{clip_id}.mp4"
                 if not check_processed_file(output_file):
@@ -3027,10 +2736,7 @@ def main():
                             is_chain_extend = True
                             logger.info(f"Clip {clip_id}: chain extend (chain_id={clip['chain_id']}) — will trim first frame + mute audio")
                     target_duration = clip['endTime'] - clip['startTime']
-                    if clip_id in _entity_force_clip_ids:
-                        output_file = temp_dir / f"processed_{clip_id}_entity.mp4"
-                    else:
-                        output_file = temp_dir / f"processed_{clip_id}.mp4"
+                    output_file = temp_dir / f"processed_{clip_id}.mp4"
 
                     if clip_id not in files_to_process_ids:
                         # Файл уже готов — обновляем трекеры без перекодирования
@@ -3045,11 +2751,6 @@ def main():
                     adjusted_target = max(0.1, target_duration - drift)
                     if abs(drift) > 0.001:
                         logger.debug(f"Clip {clip_id}: drift={drift:+.4f}с → target {target_duration:.4f}с → adjusted {adjusted_target:.4f}с")
-                    _clip_entity_overlays = _localize_entity_overlays(
-                        _entity_slots_by_clip.get(clip_id, []),
-                        cumulative_actual,
-                        adjusted_target,
-                    )
 
                     # Сцена может состоять из нескольких скачанных отрезков —
                     # тогда каждый приводится к целевому формату отдельно, и они
@@ -3086,7 +2787,6 @@ def main():
                             fade_in=_fade_in, fade_out=_fade_out,
                             transition_duration=_transition_duration,
                             zoom_style=_clip_zoom_style,
-                            entity_overlays=_clip_entity_overlays,
                             static_no_motion=_static_infographic,
                         )
                         if clip_parts:
@@ -3119,7 +2819,6 @@ def main():
                                     fade_in=_fade_in, fade_out=_fade_out,
                                     transition_duration=_transition_duration,
                                     zoom_style=_clip_zoom_style,
-                                    entity_overlays=_clip_entity_overlays,
                                     static_no_motion=_static_infographic,
                                 )
                                 if actual_dur is not None:
@@ -3145,7 +2844,6 @@ def main():
                                     target_size=_target_size,
                                     fade_in=_fade_in, fade_out=_fade_out,
                                     transition_duration=_transition_duration,
-                                    entity_overlays=_clip_entity_overlays,
                                 )
                                 if actual_dur is not None:
                                     break
@@ -3157,11 +2855,6 @@ def main():
                         existing_files[clip_id] = str(output_file)
                         cumulative_planned += target_duration
                         cumulative_actual  += actual_dur
-                        _entity_baked_uids.update(
-                            slot.get('_entity_uid')
-                            for slot in _clip_entity_overlays
-                            if slot.get('_entity_uid') is not None
-                        )
 
                         _retime_done += 1
                         if IS_PIPE:
@@ -3300,56 +2993,6 @@ def main():
             print(f"\n[OK] VEO audio inline: сохраняем VEO звук в финальном видео...")
             shutil.copy2(str(temp_video), args.output)
             logger.info(f"Финальный файл создан (VEO audio): {args.output}")
-
-        # ЭТАП 8.4: ENTITY OVERLAYS (карточки персон/мест из Wikipedia)
-        if _entity_on:
-            try:
-                logger.info("ЭТАП 8.4: ENTITY OVERLAYS (person/place cards)")
-                print("\n🧩 Entity overlays: карточки персон/мест...")
-                if not _entity_slots:
-                    # Фоновая стадия могла закончить запись кэша уже во время ретайминга.
-                    # Повторно читаем кэш, но поздно найденные карточки оставляем резервному
-                    # post-concat режиму: пересобирать весь ролик второй раз не требуется.
-                    _late_raw_slots = _load_entity_overlay_slots(args, _entity_size)
-                    _entity_slots, _late_by_clip = _bind_entity_overlays_to_clips(
-                        _late_raw_slots, corrected_clips)
-
-                _remaining_slots = [
-                    slot for slot in _entity_slots
-                    if slot.get('_entity_uid') not in _entity_baked_uids
-                ]
-                if not _entity_slots:
-                    print("   ⚠️  Entity: готовых карточек нет — фоновая стадия не успела "
-                          "или не запускалась.")
-                    print("   ⚠️  Ролик соберётся БЕЗ карточек. Чтобы конкат качал их сам: "
-                          "ENTITY_OVERLAY_CONCAT_DOWNLOAD=1")
-                    logger.warning("Entity: нет готовых карточек (cache_only) — собираю без них")
-                elif _remaining_slots:
-                    from units.entity_cards import apply_entity_overlays as _apply_ent
-                    _ent_out = Path(args.output).with_name(Path(args.output).stem + '_entity' + Path(args.output).suffix)
-                    _res = _apply_ent(
-                        base_video=args.output, output_video=_ent_out, slots=_remaining_slots,
-                        ffmpeg_path=FFMPEG, encoder_type=encoder_type,
-                        bitrate=args.bitrate, duration=audio_duration,
-                    )
-                    shutil.move(str(_res), args.output)
-                    logger.info(
-                        f"Entity post-concat fallback applied: {len(_remaining_slots)} cards; "
-                        f"baked per clip: {len(_entity_baked_uids)}")
-                    print(
-                        f"   ✅ В ретайминге: {len(_entity_baked_uids)}; "
-                        f"резервным post-режимом: {len(_remaining_slots)}")
-                else:
-                    logger.info(
-                        f"Entity overlays already baked into retimed clips: "
-                        f"{len(_entity_baked_uids)}")
-                    print(
-                        f"   ✅ Все Entity-карточки уже запечены в выбранные клипы: "
-                        f"{len(_entity_baked_uids)}")
-            except Exception as _ee:
-                logger.error(f"Entity overlays failed: {_ee}")
-                logger.error(traceback.format_exc())
-                print(f"   ⚠️  Entity overlays skipped: {_ee}")
 
         # ЭТАП 9: ОЧИСТКА
         logger.info("ЭТАП 9: ОЧИСТКА")

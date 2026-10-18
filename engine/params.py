@@ -508,11 +508,6 @@ PIXABAY_API_KEY_2 = os.getenv('PIXABAY_API_KEY_2', '').strip()
 PIXABAY_API_KEY_3 = os.getenv('PIXABAY_API_KEY_3', '').strip()
 
 
-# ============================================================================
-# ENTITY OVERLAY (карточки персон/мест из Wikipedia поверх видео)
-# ============================================================================
-ENTITY_OVERLAY_ENABLED = os.getenv('ENTITY_OVERLAY_ENABLED', 'false').lower() in ('true', '1', 'yes', 'on')
-
 # Плашка источника на кадре («Wikimedia», «Google Images») для архивных кадров.
 # ВЫКЛЮЧЕНА по умолчанию: надпись в углу портит продакшн-качество ролика
 # (решение пользователя 26.08). Атрибуция при этом не теряется — остаётся в
@@ -546,26 +541,6 @@ CODEX_MAX_PARALLEL = max(1, min(16, int(os.getenv('CODEX_MAX_PARALLEL', '4') or 
 # четырёх одновременных вызовов три отработали за 24 с, а четвёртый упал за
 # 6.7 с — и сцена ушла на механический фолбэк вместо повтора.
 CODEX_RETRIES = max(1, min(5, int(os.getenv('CODEX_RETRIES', '2') or 2)))
-ENTITY_OVERLAY_BACKEND = os.getenv('ENTITY_OVERLAY_BACKEND', 'auto').strip().lower()  # auto|gpt|deepseek|openrouter|claude_api|claude|regex
-# Модель детекции сущностей. Пусто → дефолт выбранного провайдера.
-ENTITY_OVERLAY_MODEL = _model('ENTITY_OVERLAY_MODEL', '')
-_entity_overlay_max_raw = os.getenv('ENTITY_OVERLAY_MAX', '20').strip().lower()
-try:
-    ENTITY_OVERLAY_MAX = 0 if _entity_overlay_max_raw in ('0', 'all', 'auto', 'max') else int(_entity_overlay_max_raw or '20')
-except ValueError:
-    ENTITY_OVERLAY_MAX = 20
-ENTITY_OVERLAY_HOLD_SEC = float(os.getenv('ENTITY_OVERLAY_HOLD_SEC', '4.2'))
-ENTITY_OVERLAY_MIN_GAP_SEC = float(os.getenv('ENTITY_OVERLAY_MIN_GAP_SEC', '24'))
-ENTITY_OVERLAY_PROVIDERS = os.getenv('ENTITY_OVERLAY_PROVIDERS', 'wikipedia,yandex').strip()
-ENTITY_OVERLAY_WIKI_LANGS = os.getenv('ENTITY_OVERLAY_WIKI_LANGS', 'ru,en').strip()
-ENTITY_OVERLAY_MAX_DOWNLOAD_MB = int(os.getenv('ENTITY_OVERLAY_MAX_DOWNLOAD_MB', '12'))
-# Сколько карточек качать одновременно. Раньше качались строго по одной, и на 20 карточках
-# это давало минуты ожидания. 1 = старое поведение (последовательно).
-ENTITY_OVERLAY_PARALLEL = max(1, int(os.getenv('ENTITY_OVERLAY_PARALLEL', '4') or '4'))
-# Макс. время фоновой подготовки карточек (сек). Дедлайн = МИН(это, готовность пайплайна):
-# конкат не ждёт — берёт из кэша те карточки, что успели.
-ENTITY_OVERLAY_WAIT_TIMEOUT = int(os.getenv('ENTITY_OVERLAY_WAIT_TIMEOUT', '1800'))
-ENTITY_OVERLAY_PLACE_CAPTION = os.getenv('ENTITY_OVERLAY_PLACE_CAPTION', 'false').lower() in ('true', '1', 'yes', 'on')
 
 # YT Packer: длинные multi-lang промпты (титры+описание+теги × N языков)
 # 90с мало — пакет может быть на 10+ минут. 600с = 10 мин.

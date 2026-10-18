@@ -594,7 +594,6 @@ def _run_post_pipeline_silent(
                 'YOUTUBE_FOOTAGE_ENABLED',
                 'INFOGRAPHIC_ENABLED',
                 'MOTION_GRAPHICS_ENABLED',
-                'ENTITY_OVERLAY_ENABLED',
             )
         )
         if not external_stages_enabled:
@@ -603,7 +602,7 @@ def _run_post_pipeline_silent(
 
     # ── Формат кадра ролика (16:9 / 9:16) ──────────────────────────────────
     # Единый источник — VEONONSTOP_ASPECT_RATIO (радио Ratio в GUI). От него
-    # считаются целевые размеры для Real Photo / Stock / Entity-карточек —
+    # считаются целевые размеры для Real Photo / Stock —
     # раньше тут были захардкожены 1920x1080 и вертикальный ролик получал
     # горизонтальные стадии.
     _frame_ar = (config.VEONONSTOP_ASPECT_RATIO or '16:9').strip()
@@ -930,12 +929,6 @@ def _run_post_pipeline_silent(
         print(f"  [Параллакс] не стартовал: {_pxe}")
         logging.debug(traceback.format_exc())
 
-    # ── Entity overlays (карточки персон/мест) ─────────────────────────────
-    # Раньше качались ВНУТРИ конката (этап 8.4) и держали его: 20 карточек ×
-    # (Wikipedia + скачивание) — минуты простоя, прервать нечем. Теперь качаем
-    # заранее и параллельно генерации; конкат возьмёт готовое из кэша.
-    # Карточки независимы → частичный результат нормален: не успели 8 из 20 —
-    # в ролике будет 12 карточек, а не ошибка.
     # YouTube/user-footage stage runs independently from Stock and Real Photo.
     _youtube_thread = None
     _youtube_holder = [None]
@@ -982,66 +975,6 @@ def _run_post_pipeline_silent(
             print(f"  [YouTube] stage did not start: {e}")
             logging.debug(traceback.format_exc())
 
-    _entity_thread = None
-    _entity_holder = [None]
-    if os.environ.get('ENTITY_OVERLAY_ENABLED', 'false').lower() in ('1', 'true', 'yes', 'on'):
-        try:
-            from pathlib import Path as _PathEnt
-            import threading as _ent_th
-            import time as _ent_time
-            print()
-            print("  " + "=" * 56)
-            print("  ENTITY OVERLAYS — person/place cards (background)")
-            print("  " + "=" * 56)
-            _ent_timeout = int(os.environ.get('ENTITY_OVERLAY_WAIT_TIMEOUT',
-                                              getattr(config, 'ENTITY_OVERLAY_WAIT_TIMEOUT', 1800)))
-            _ent_deadline = _ent_time.time() + _ent_timeout
-
-            def _entity_worker():
-                try:
-                    from units.entity_cards import plan_and_render_entity_overlays as _plan_ent_bg
-                    # size — целевое разрешение проекта; если конкат соберёт в другом,
-                    # карточки дорендерятся из кэша локально, без сети.
-                    _ent_size = os.environ.get('ENTITY_OVERLAY_SIZE', f'{_frame_w}x{_frame_h}')
-                    _entity_holder[0] = _plan_ent_bg(
-                        _PathEnt(project_dir),
-                        size=_ent_size,
-                        stop_event=_real_photo_stop,   # общая стоп-кнопка пайплайна
-                        deadline_ts=_ent_deadline,
-                    )
-                except Exception as _ee:
-                    print(f"  [Entity] BG failed: {_ee}")
-                    logging.debug(traceback.format_exc())
-                    _entity_holder[0] = None
-
-            _entity_thread = _ent_th.Thread(target=_entity_worker, daemon=True, name='entity-bg')
-            _entity_thread.start()
-            print(f"  [Entity] Качает параллельно генерации; стоп = конец генерации ИЛИ "
-                  f"{_ent_timeout // 60} мин (что раньше)")
-            print("  [Entity] Конкат возьмёт готовые карточки из кэша и качать не будет\n")
-        except Exception as e:
-            print(f"  [Entity] стадия не стартовала (карточки соберёт конкат): {e}")
-            logging.debug(traceback.format_exc())
-
-    def _wait_entity(*, label="i2v"):
-        """Стоп + join фоновой entity-стадии перед финалом.
-
-        Не успел — не беда: конкат возьмёт из кэша то, что готово (cache_only),
-        недостающие карточки просто не появятся в ролике.
-        """
-        nonlocal _entity_thread
-        if _entity_thread is None:
-            return
-        if _entity_thread.is_alive():
-            print(f"  [Entity] {label}: стоп загрузку карточек (готовые — в кэше)")
-            _real_photo_stop.set()
-            _entity_thread.join(timeout=120)
-            if _entity_thread.is_alive():
-                print("  [Entity] поток не завершился за 120с — иду дальше")
-        _cards = _entity_holder[0]
-        if isinstance(_cards, list):
-            print(f"  [Entity] итог: {len(_cards)} карточек готово")
-        _entity_thread = None    # idempotent
 
     def _stage_media_count(where) -> int:
         """Сколько сцен уже закрыто материалом — признак ЖИВОЙ работы стадии.
@@ -2348,7 +2281,6 @@ def _run_post_pipeline_silent(
         _wait_real_photo(label="pipeline finish")
         _wait_stock(label="pipeline finish")
         _wait_mograph(label="pipeline finish")
-        _wait_entity(label="pipeline finish")
 
         # Pre-concat fallback: догенерить картинкой ЛЮБОЙ клип без медиа.
         # Ловим по ФАКТУ отсутствия медиа (нет vid_img/{id} И нет generated/{id}), а НЕ по
