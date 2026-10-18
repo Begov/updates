@@ -591,7 +591,6 @@ def _run_post_pipeline_silent(
             for key in (
                 'REAL_PHOTO_ENABLED',
                 'STOCK_ENABLED',
-                'YOUTUBE_FOOTAGE_ENABLED',
                 'INFOGRAPHIC_ENABLED',
                 'MOTION_GRAPHICS_ENABLED',
             )
@@ -929,53 +928,6 @@ def _run_post_pipeline_silent(
         print(f"  [Параллакс] не стартовал: {_pxe}")
         logging.debug(traceback.format_exc())
 
-    # YouTube/user-footage stage runs independently from Stock and Real Photo.
-    _youtube_thread = None
-    _youtube_holder = [None]
-    _youtube_stop = _rp_threading.Event()
-
-    if os.environ.get('YOUTUBE_FOOTAGE_ENABLED', 'false').lower() in ('1', 'true', 'yes'):
-        try:
-            from units.tube_runner import run_youtube_stage
-            from pathlib import Path as _PathYT
-            import threading as _yt_th
-
-            print()
-            print("  " + "=" * 56)
-            print("  YOUTUBE FOOTAGE STAGE - user library / YouTube (background)")
-            print("  " + "=" * 56)
-
-            def _youtube_worker():
-                try:
-                    _youtube_holder[0] = run_youtube_stage(
-                        _PathYT(project_dir),
-                        target_w=_frame_w,
-                        target_h=_frame_h,
-                        fps=getattr(config, 'VIDEO_FPS', 60),
-                        # Real Photo completion must not cancel YouTube.
-                        stop_event=_youtube_stop,
-                        deadline_ts=None,
-                    )
-                except Exception as _yte:
-                    print(f"  [YouTube] BG stage failed: {_yte}")
-                    logging.debug(traceback.format_exc())
-                    _youtube_holder[0] = {'error': str(_yte)}
-
-            _youtube_thread = _yt_th.Thread(
-                target=_youtube_worker,
-                daemon=True,
-                name='youtube-footage-bg',
-            )
-            _youtube_thread.start()
-            print(
-                "  [YouTube] started in background; the wait timer begins only "
-                "when the pipeline is otherwise ready for concat"
-            )
-        except Exception as e:
-            print(f"  [YouTube] stage did not start: {e}")
-            logging.debug(traceback.format_exc())
-
-
     def _stage_media_count(where) -> int:
         """Сколько сцен уже закрыто материалом — признак ЖИВОЙ работы стадии.
 
@@ -1104,85 +1056,6 @@ def _run_post_pipeline_silent(
                   f"{mg.get('failed', 0)} → нейрогенерация")
         _mograph_thread = None
 
-    def _wait_youtube(*, label="i2v"):
-        """Join YouTube Footage before fallback or concat."""
-        nonlocal _youtube_thread
-        if _youtube_thread is None:
-            return
-        wait_expired = False
-        if _youtube_thread.is_alive():
-            # Тот же сторож тишины, что и у стока: ждём, пока стадия закрывает
-            # сцены, и обрываем только по молчанию. Прежние фиксированные 500 с
-            # отсчитывались от конца генерации — на длинном ролике этого не
-            # хватало ни на что, а якорь выбран неверно: когда ютуб основной
-            # источник, генерации нет вовсе.
-            idle_limit = max(60, int(getattr(config, 'YOUTUBE_IDLE_TIMEOUT', 300)))
-            hard_limit = max(0, int(getattr(config, 'YOUTUBE_WAIT_TIMEOUT', 500))) * 10
-            print(f"  [YouTube] {label}: остальные стадии готовы; жду, пока ютуб "
-                  f"закрывает сцены (обрыв после {idle_limit}с тишины)")
-            started = time.time()
-            last_change = time.time()
-            seen = _stage_media_count(project_dir)
-            while _youtube_thread.is_alive():
-                _youtube_thread.join(timeout=15)
-                now = _stage_media_count(project_dir)
-                if now != seen:
-                    seen = now
-                    last_change = time.time()
-                    continue
-                quiet = time.time() - last_change
-                if quiet >= idle_limit:
-                    print(f"  [YouTube] {label}: тишина {int(quiet)}с — "
-                          f"стадия ничего не закрывает, останавливаю")
-                    break
-                if hard_limit and (time.time() - started) >= hard_limit:
-                    print(f"  [YouTube] {label}: верхний предел {hard_limit}с исчерпан")
-                    break
-        if _youtube_thread.is_alive():
-            wait_expired = True
-            print(
-                "  [YouTube] concat wait expired; stopping YouTube and routing "
-                "unresolved clips to EPF/Real Photo"
-            )
-            _youtube_stop.set()
-            # The active scene may already contain useful YouTube fragments.
-            # Give it one EPF-search budget to render only the missing tail and
-            # commit the hybrid clip before full fallback handles untouched
-            # youtube_pending scenes.
-            _youtube_finish_wait = max(
-                30,
-                int(getattr(config, 'REAL_PHOTO_EPF_SEARCH_TIMEOUT', 180) or 180)
-                + 120,
-            )
-            _youtube_thread.join(timeout=_youtube_finish_wait)
-        if wait_expired:
-            try:
-                from units.tube_runner import fallback_pending_youtube
-                fallback_result = fallback_pending_youtube(
-                    _PathYT(project_dir),
-                    target_w=_frame_w,
-                    target_h=_frame_h,
-                    fps=getattr(config, 'VIDEO_FPS', 60),
-                )
-                print(
-                    f"  [YouTube] EPF fallback selected "
-                    f"{fallback_result.get('selected', 0)} clips"
-                )
-                if fallback_result.get('error'):
-                    print(
-                        f"  [YouTube] EPF fallback error: "
-                        f"{fallback_result.get('error')}"
-                    )
-            except Exception as fallback_exc:
-                print(f"  [YouTube] EPF fallback failed: {fallback_exc}")
-                logging.debug(traceback.format_exc())
-        yt = _youtube_holder[0]
-        if isinstance(yt, dict):
-            print(
-                f"  [YouTube] result: {yt.get('ok', 0)} ok / "
-                f"{yt.get('failed', 0)} failed / {yt.get('total', 0)} total"
-            )
-        _youtube_thread = None
 
     def _wait_real_photo(*, label="i2v"):
         """Give Real Photo a bounded final window before enabling AI fallback."""
@@ -2274,10 +2147,6 @@ def _run_post_pipeline_silent(
         # Музыка идёт отдельным фоновым процессом и в сводке не появлялась —
         # пользователь не знал, сделалась она или нет. Читаем её статус-файл.
 
-        # Real Photo / Stock: дождаться фоновых загрузок до YT Pack / video_concat.
-        # Обязательно ДО Pre-concat fallback ниже: иначе он увидит клип без медиа
-        # (поток ещё качает) и зря догенерит картинку поверх будущего футажа.
-        _wait_youtube(label="pipeline finish")
         _wait_real_photo(label="pipeline finish")
         _wait_stock(label="pipeline finish")
         _wait_mograph(label="pipeline finish")

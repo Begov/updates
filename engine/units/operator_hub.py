@@ -109,7 +109,6 @@ def resolve_text_operator(stage: str = "") -> tuple[str, str]:
         return "" if value in ("", "auto", "none", "off") else value
 
     stage_keys = {
-        "youtube": ("YOUTUBE_QUERY_PROVIDER", "YOUTUBE_QUERY_MODEL"),
         "stock": ("STOCK_PROMPT_PROVIDER", "STOCK_PROMPT_MODEL"),
         "real_photo": ("REAL_PHOTO_PROMPT_PROVIDER", "REAL_PHOTO_PROMPT_MODEL"),
         "style_extract": ("STYLE_EXTRACT_BACKEND", "STYLE_EXTRACT_MODEL"),
@@ -242,7 +241,7 @@ def ask_text(
 
 def ask_json(provider: str, model: str, prompt: str, **kwargs) -> dict:
     """`ask_text` + разбор JSON-объекта из ответа."""
-    from units.tube_runner import _parse_json_object
+    from units.vision_picker import _parse_json_object
 
     raw = ask_text(provider, model, prompt, **kwargs)
     try:

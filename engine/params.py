@@ -185,25 +185,6 @@ VISUAL_STORY_MUST_HAVE = (
     os.getenv('VISUAL_STORY_MUST_HAVE', 'false').strip().lower()
     in ('1', 'true', 'yes', 'on')
 )
-# Ютуб-стадия: отсекать ролики, чья ориентация не совпадает с целевой (Shorts
-# в 16:9-проекте и наоборот). У поиска YouTube фильтра ориентации нет —
-# режем по width/height из деталей yt-dlp, до окон и превью (улов 25.08).
-YOUTUBE_MATCH_ORIENTATION = (
-    os.getenv('YOUTUBE_MATCH_ORIENTATION', 'true').strip().lower()
-    in ('1', 'true', 'yes', 'on')
-)
-# Сколько роликов брать из поиска на клип (отдельно от размера пула кусков
-# YOUTUBE_POOL_TARGET): при пределе = пулу два негодных ролика из четырёх
-# оставляли пул на двух оставшихся (улов 25.08).
-YOUTUBE_DISCOVERY_LIMIT = max(
-    1, int(os.getenv('YOUTUBE_DISCOVERY_LIMIT', '12') or 12)
-)
-# Сцена закрывается РАВНЫМИ кусками ютуба (n = round(длина / предел)); кусок
-# может превысить YOUTUBE_MAX_FRAGMENT_SEC не больше, чем на этот допуск
-# (6.5 с → 2 × 3.25, не 3 + 3 + стоп-кадр 0.5 с). Решение 25.08.
-YOUTUBE_FRAGMENT_TOLERANCE_SEC = max(
-    0.0, float(os.getenv('YOUTUBE_FRAGMENT_TOLERANCE_SEC', '1.0') or 1.0)
-)
 
 # Путь к Codex CLI exe (auto-detect per platform)
 import shutil as _shutil
@@ -350,15 +331,12 @@ STOCK_VISION_CANDIDATES = max(0, int(os.getenv('STOCK_VISION_CANDIDATES', '5') o
 # проходят свободно и подходят к вижну с уже готовыми файлами.
 STOCK_PARALLEL = max(1, int(os.getenv('STOCK_PARALLEL', '12') or 12))
 # Сколько ждать сток после того, как остальные стадии готовы, — прежде чем
-# рубить загрузку и отдавать остаток нейрогенерации. Ровно тот же приём, что
-# у ютуба (YOUTUBE_WAIT_TIMEOUT): раньше в обычном режиме стоп прилетал
-# мгновенно, и на короткой генерации сток терял хвост очереди.
+# рубить загрузку и отдавать остаток нейрогенерации: раньше в обычном режиме
+# стоп прилетал мгновенно, и на короткой генерации сток терял хвост очереди.
 STOCK_PIPELINE_WAIT_TIMEOUT = max(0, int(os.getenv('STOCK_PIPELINE_WAIT_TIMEOUT', '500') or 500))
 
 # Сток: сколько секунд ТИШИНЫ (ни одной новой закрытой сцены) ждать перед остановкой. Заменяет глухой отсчёт: пока стадия работает, ждём.
 STOCK_IDLE_TIMEOUT = max(60, int(os.getenv('STOCK_IDLE_TIMEOUT', '300') or '300'))
-# YouTube: то же самое. Заменяет глухой отсчёт: пока стадия работает, ждём.
-YOUTUBE_IDLE_TIMEOUT = max(60, int(os.getenv('YOUTUBE_IDLE_TIMEOUT', '300') or '300'))
 # Real Photo: то же самое. Заменяет глухой отсчёт: пока стадия работает, ждём.
 REAL_PHOTO_IDLE_TIMEOUT = max(60, int(os.getenv('REAL_PHOTO_IDLE_TIMEOUT', '300') or '300'))
 # Отказ стока (429, авария 5xx, обрыв связи) — не «ничего не нашлось»: ждём и
@@ -402,68 +380,6 @@ STOCK_PROXY_URL = os.getenv('STOCK_PROXY_URL', '').strip()
 YOUTUBE_FOOTAGE_ENABLED = os.getenv(
     'YOUTUBE_FOOTAGE_ENABLED', 'false'
 ).lower() in ('true', '1', 'yes', 'on')
-YOUTUBE_POOL_TARGET = max(1, int(os.getenv('YOUTUBE_POOL_TARGET', '6') or '6'))
-YOUTUBE_SEARCH_TIMEOUT = max(30, int(os.getenv('YOUTUBE_SEARCH_TIMEOUT', '120') or '120'))
-YOUTUBE_DOWNLOAD_TIMEOUT = max(60, int(os.getenv('YOUTUBE_DOWNLOAD_TIMEOUT', '900') or '900'))
-# Extra wait only after all other stages are ready and concat is blocked by YouTube.
-YOUTUBE_WAIT_TIMEOUT = max(1, int(os.getenv('YOUTUBE_WAIT_TIMEOUT', '500') or '500'))
-YOUTUBE_MAX_FRAGMENT_SEC = max(0.5, float(os.getenv('YOUTUBE_MAX_FRAGMENT_SEC', '3') or '3'))
-YOUTUBE_SAME_VIDEO_MIN_SOURCE_GAP_SEC = max(
-    0.0, float(os.getenv('YOUTUBE_SAME_VIDEO_MIN_SOURCE_GAP_SEC', '20') or '20')
-)
-# Квоты одного ролика-источника (решение 23.08, HYPOTHESIS_VISUAL_STORY_QUERIES H9).
-# Доля хронометража фильма, которую может дать один video_id (0 = без лимита).
-YOUTUBE_SOURCE_MAX_SHARE = max(
-    0.0, float(os.getenv('YOUTUBE_SOURCE_MAX_SHARE', '0.15') or '0.15')
-)
-# Сколько сцен ПОДРЯД может кормиться одним роликом (переиспользование).
-YOUTUBE_SOURCE_MAX_CHAIN = max(
-    1, int(os.getenv('YOUTUBE_SOURCE_MAX_CHAIN', '3') or '3')
-)
-# Свежий поиск: тот же ролик не ближе K клипов к последнему его появлению.
-YOUTUBE_SAME_VIDEO_MIN_CLIP_GAP = max(
-    0, int(os.getenv('YOUTUBE_SAME_VIDEO_MIN_CLIP_GAP', '5') or '5')
-)
-YOUTUBE_DLP_PATH = os.getenv('YOUTUBE_DLP_PATH', '').strip()
-YOUTUBE_SEARCH_BACKEND = os.getenv('YOUTUBE_SEARCH_BACKEND', 'auto').strip().lower()
-if YOUTUBE_SEARCH_BACKEND not in ('auto', 'data_api', 'yt_dlp'):
-    YOUTUBE_SEARCH_BACKEND = 'auto'
-YOUTUBE_DATA_API_KEY = os.getenv('YOUTUBE_DATA_API_KEY', '').strip()
-YOUTUBE_LICENSE_POLICY = os.getenv(
-    'YOUTUBE_LICENSE_POLICY', 'creative_common'
-).strip().lower()
-if YOUTUBE_LICENSE_POLICY not in ('creative_common', 'any'):
-    YOUTUBE_LICENSE_POLICY = 'creative_common'
-YOUTUBE_RIGHTS_TEXT_POLICY = os.getenv(
-    'YOUTUBE_RIGHTS_TEXT_POLICY', 'exclude'
-).strip().lower()
-if YOUTUBE_RIGHTS_TEXT_POLICY not in ('exclude', 'warn'):
-    YOUTUBE_RIGHTS_TEXT_POLICY = 'exclude'
-YOUTUBE_SELECTOR_PROVIDER = os.getenv(
-    'YOUTUBE_SELECTOR_PROVIDER', 'auto'
-).strip().lower()
-YOUTUBE_SELECTOR_MODEL = _model('YOUTUBE_SELECTOR_MODEL', '')
-# Отбор роликов по названию и описанию из выдачи Data API — этап лёгкий, ему
-# отдельный оператор: прочесть десяток карточек и расставить порядок тяжёлой
-# модели незачем. Пусто/auto — общий оператор стадии.
-# Окон с одного ролика. 0 — по старой карте пар; иначе пара «роликов x окон»
-# из GUI: 3x3, 4x2, 4x6 и т.п.
-# Брать ли ролики ниже 720p («sd» в Data API). По умолчанию нет: такие ролики
-# на деле оказываются 360-480p, и качать их незачем.
-YOUTUBE_ALLOW_SD = os.getenv('YOUTUBE_ALLOW_SD', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
-YOUTUBE_WINDOWS_PER_VIDEO = int(os.getenv('YOUTUBE_WINDOWS_PER_VIDEO', '0') or '0')
-YOUTUBE_RANK_PROVIDER = os.getenv(
-    'YOUTUBE_RANK_PROVIDER', 'auto'
-).strip().lower()
-YOUTUBE_RANK_MODEL = _model('YOUTUBE_RANK_MODEL', '')
-# Сколько запросов метаданных к yt-dlp вести разом. Каждое пойманное
-# ограничение частоты делит это число пополам (8 → 4 → 2 → 1).
-YOUTUBE_META_PARALLEL = int(os.getenv('YOUTUBE_META_PARALLEL', '8') or '8')
-# Сколько клипов стадия обрабатывает одновременно.
-YOUTUBE_CLIP_PARALLEL = int(os.getenv('YOUTUBE_CLIP_PARALLEL', '4') or '4')
-YOUTUBE_RATIO_TARGET = float(os.getenv('YOUTUBE_RATIO_TARGET', '0.0') or '0.0')
-YOUTUBE_RATIO_MAX = float(os.getenv('YOUTUBE_RATIO_MAX', '1.0') or '1.0')
-
 
 # Сколько кандидатов берём от КАЖДОГО включённого стока, прежде чем добирать
 # остальными. Обычный режим — три стока сразу, и без квоты лист перекашивал тот,
@@ -542,9 +458,6 @@ CODEX_MAX_PARALLEL = max(1, min(16, int(os.getenv('CODEX_MAX_PARALLEL', '4') or 
 # 6.7 с — и сцена ушла на механический фолбэк вместо повтора.
 CODEX_RETRIES = max(1, min(5, int(os.getenv('CODEX_RETRIES', '2') or 2)))
 
-# YT Packer: длинные multi-lang промпты (титры+описание+теги × N языков)
-# 90с мало — пакет может быть на 10+ минут. 600с = 10 мин.
-YT_PACK_GPT_TIMEOUT = int(os.getenv('YT_PACK_GPT_TIMEOUT', '600'))
 
 # Codex "high demand" cooldown (s) — пауза перед retry когда OpenAI возвращает
 # "We're currently experiencing high demand". Retry сразу = опять та же стена.
@@ -822,8 +735,6 @@ if YT_PACK_BACKEND == 'claude_api':
     YT_PACK_CONTENT_MODEL = _normalize_claude_nexus_model(
         YT_PACK_CONTENT_MODEL)
 
-# Переключатели подэтапов
-YT_PACK_SUBTITLES = os.getenv('YT_PACK_SUBTITLES', 'true').lower() in ('true', '1', 'yes')
 
 # Длина фразы субтитров (для subtitles.srt, выжигаемых конкатом).
 # UNIT=chars → по символам (дефолт 50). UNIT=words → по СЛОВАМ (1 = каждое слово отдельным
@@ -835,13 +746,7 @@ try:
     SUBTITLE_PHRASE_LEN = int(os.getenv('SUBTITLE_PHRASE_LEN', '') or ('50' if SUBTITLE_PHRASE_UNIT == 'chars' else '1'))
 except ValueError:
     SUBTITLE_PHRASE_LEN = 50 if SUBTITLE_PHRASE_UNIT == 'chars' else 1
-YT_PACK_DESCRIPTION = os.getenv('YT_PACK_DESCRIPTION', 'true').lower() in ('true', '1', 'yes')
-YT_PACK_COVERS = os.getenv('YT_PACK_COVERS', 'true').lower() in ('true', '1', 'yes')
 
-# Настройки обложек
-YT_PACK_COVER_PROVIDER = os.getenv('YT_PACK_COVER_PROVIDER', 'fastgen')  # fastgen | veononstop
-YT_PACK_COVER_MODEL = _model('YT_PACK_COVER_MODEL', 'GEM_PIX_2')
-YT_PACK_COVER_COUNT = int(os.getenv('YT_PACK_COVER_COUNT', '4'))
 
 # ============================================================================
 # НАСТРОЙКИ FASTGEN API (генерация изображений)

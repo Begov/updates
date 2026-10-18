@@ -99,9 +99,6 @@ def stage_env(v: dict) -> dict:
     sp = v.get("stock_prompt_provider") or "auto"
     m["STOCK_PROMPT_PROVIDER"] = "" if sp == "auto" else sp
     m["STOCK_PROMPT_MODEL"] = "" if sp == "auto" else catalog.operator_model_to_id(sp, v.get("stock_prompt_model", ""))
-    # ютуб-стадия в BegoFrame не используется
-    m["YOUTUBE_FOOTAGE_ENABLED"] = "false"
-    m["YOUTUBE_RATIO_TARGET"] = "0.000"
     # инфографика: ноль в доле = стадия выключена целиком; заданная доля — она же потолок
     target = mix["mix_infographic"]
     m["INFOGRAPHIC_ENABLED"] = _b(v.get("infographic_enabled") and target > 0)

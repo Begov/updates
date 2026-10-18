@@ -1523,8 +1523,6 @@ class GptDirector:
             json.dumps(montage_plan, indent=2, ensure_ascii=False),
             encoding='utf-8'
         )
-        from units.source_router import apply_youtube_ratio_policy
-        apply_youtube_ratio_policy(mp_path)
         from units.real_source_policy import (
             apply_policy as apply_non_ai_policy,
             enabled as non_ai_enabled,
@@ -1594,8 +1592,6 @@ class GptDirector:
         # одна точка правды на оба директора (chat_director зовёт её же).
         from units.stock_tags import stock_markup_directive
         stock_suffix = stock_markup_directive()
-        from units.tube_tags import youtube_markup_directive
-        youtube_suffix = youtube_markup_directive()
         from units.infographic_tags import infographic_markup_directive
         infographic_suffix = infographic_markup_directive()
         from units.mograph_tags import motion_graphics_markup_directive
@@ -1658,7 +1654,7 @@ Rules:
 - Last clip endTime must equal audioDuration ({audio_duration:.2f})
 - IDs sequential: 1, 2, 3, ...
 - File format: "{{id}}.mp4"
-{theme_rule}{real_photo_suffix}{stock_suffix}{youtube_suffix}{infographic_suffix}{mograph_suffix}
+{theme_rule}{real_photo_suffix}{stock_suffix}{infographic_suffix}{mograph_suffix}
 Write the JSON file and then report your status in your final response."""
 
     # =========================================================================

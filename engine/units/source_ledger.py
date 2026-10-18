@@ -45,14 +45,6 @@ STOCK_SOURCES = frozenset({
     'stock_video',
 })
 
-# YouTube Footage stage. ``youtube_pending`` is assigned by a director;
-# ``youtube`` is a rendered video in ``vid_img/``.
-YOUTUBE_SOURCES = frozenset({
-    'youtube_pending',
-    'youtube',
-    'youtube_video',
-})
-
 # AI-generated information graphics. Unlike archival/stock sources, these
 # clips MUST go through image generation but MUST NOT be sent to VideoGen.
 INFOGRAPHIC_SOURCES = frozenset({
@@ -89,9 +81,9 @@ FILLER_SOURCES = frozenset({
 })
 
 # Всё, что НЕ должно попасть в нейрогенерацию.
-# Именно этот набор проверяют ImgGen/FastGen/Veo/FlowUltra/watch_i2v.
+# Именно этот набор проверяют ImgGen/FastGen/Veo/watch_i2v.
 # Обложка здесь же: её картинка пришла файлом от пользователя, рисовать нечего.
-EXTERNAL_SOURCES = (REAL_PHOTO_SOURCES | STOCK_SOURCES | YOUTUBE_SOURCES
+EXTERNAL_SOURCES = (REAL_PHOTO_SOURCES | STOCK_SOURCES
                     | COVER_SOURCES | MOTION_GRAPHICS_SOURCES | FILLER_SOURCES)
 
 # Everything that must skip Veo / Flow Ultra / i2v watchers. Infographics are
@@ -450,19 +442,13 @@ def log_source_markup(clips, printer=print) -> None:
     rp_on = bool(getattr(config, 'REAL_PHOTO_ENABLED', False))
     st_on = bool(getattr(config, 'STOCK_ENABLED', False))
     ig_on = bool(getattr(config, 'INFOGRAPHIC_ENABLED', False))
-    # Ютуб теперь размечает РЕЖИССЁР, наравне с прочими (27.08). Пока его клипы
-    # назначал пост-маршрутизатор, показывать в сводке Pass 1 было нечего, и
-    # стадии здесь не было вовсе — из-за чего в логе прогона казалось, что ютуб
-    # обошли стороной.
-    yt_on = bool(getattr(config, 'YOUTUBE_FOOTAGE_ENABLED', False))
     mg_on = bool(getattr(config, 'MOTION_GRAPHICS_ENABLED', False))
-    if not (rp_on or st_on or ig_on or yt_on or mg_on):
+    if not (rp_on or st_on or ig_on or mg_on):
         return
     clips = clips or []
     n_rp = sum(1 for c in clips if c.get('source') in REAL_PHOTO_SOURCES)
     n_st = sum(1 for c in clips if c.get('source') in STOCK_SOURCES)
     n_ig = sum(1 for c in clips if c.get('source') in INFOGRAPHIC_SOURCES)
-    n_yt = sum(1 for c in clips if c.get('source') in YOUTUBE_SOURCES)
     n_mg = sum(1 for c in clips if c.get('source') in MOTION_GRAPHICS_SOURCES)
     total = len(clips) or 1
     # (подпись, сколько размечено, целевая доля, ключ настройки)
@@ -471,8 +457,6 @@ def log_source_markup(clips, printer=print) -> None:
         rows.append(("Real Photo", n_rp, float(getattr(config, 'REAL_PHOTO_RATIO_TARGET', 0) or 0)))
     if st_on:
         rows.append(("Сток", n_st, float(getattr(config, 'STOCK_RATIO_TARGET', 0) or 0)))
-    if yt_on:
-        rows.append(("YouTube", n_yt, float(getattr(config, 'YOUTUBE_RATIO_TARGET', 0) or 0)))
     if ig_on:
         rows.append(("Infographic", n_ig, float(getattr(config, 'INFOGRAPHIC_RATIO_TARGET', 0) or 0)))
     if mg_on:
@@ -481,7 +465,7 @@ def log_source_markup(clips, printer=print) -> None:
     n_hold = sum(1 for c in clips if c.get('source') in FILLER_SOURCES)
     if n_hold:
         rows.append(("Удержание", n_hold, -1.0))
-    marked = n_rp + n_st + n_yt + n_ig + n_mg + n_hold
+    marked = n_rp + n_st + n_ig + n_mg + n_hold
     rows.append(("Нейрогенерация", max(0, len(clips) - marked), -1.0))
 
     _BAR = 22          # длина полосы
@@ -512,9 +496,6 @@ def log_source_markup(clips, printer=print) -> None:
     printer("   ┗" + "━" * width + "┛")
     for text in alerts:
         printer(f"   ⚠️  {text}")
-    if yt_on and n_yt == 0:
-        printer("   ⚠️  YouTube: свою долю маршрутизатор добирает только подрезкой, "
-                "собственных меток он не ставит")
     if alerts:
         printer("   ⚠️  Не то, чего ждали? Остановите прогон сейчас — дальше идут "
                 "поиск и генерация, и переделка обойдётся в час.")

@@ -12,12 +12,16 @@ vision_response.txt, selection.json (или vision_error.json).
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import shutil
+import re
 import base64
 import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,69 @@ def _panel_font(size: int = 15):
         return None
 
 
+def _parse_json_object(raw: str) -> dict[str, Any]:
+    text = str(raw or "").strip()
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.I | re.S)
+    if fenced:
+        text = fenced.group(1).strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:   # ответ не JSON — пробуем следующий разбор
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            value = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:   # ответ не JSON и во второй форме — вернём пусто
+            return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _extract_preview_frame(
+    video_path: Path,
+    timestamp: float,
+    output_path: Path,
+) -> Optional[Path]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    flags = {}
+    if os.name == "nt":
+        flags["creationflags"] = subprocess.CREATE_NO_WINDOW
+    try:
+        result = subprocess.run(
+            [
+                shutil.which("ffmpeg") or "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                f"{max(0.0, float(timestamp)):.3f}",
+                "-i",
+                str(video_path),
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=480:-2",
+                "-q:v",
+                "5",
+                "-y",
+                str(output_path),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+            **flags,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logging.warning("  [вижн] кадр превью не снят (%s): %s", output_path.name, exc)
+        return None
+    if result.returncode != 0 or not output_path.exists():
+        logging.warning("  [вижн] кадр превью пуст (%s), ffmpeg rc=%s",
+                        output_path.name, result.returncode)
+        return None
+    return output_path
+
+
+
 def build_contact_sheet(candidates: list[Candidate], output_path: Path) -> Optional[Path]:
     """Один лист на всех: видео — 3 кадра в ряд, фото — один.
 
@@ -72,7 +139,6 @@ def build_contact_sheet(candidates: list[Candidate], output_path: Path) -> Optio
     порядку — лишнее звено, где ошибка выглядела бы как обычный вердикт
     (решение пользователя 25.08)."""
     from PIL import Image, ImageDraw
-    from units.tube_runner import _extract_preview_frame
 
     panels = []
     frame_dir = output_path.parent / "frames"
@@ -246,19 +312,13 @@ def vision_capable(provider: str) -> bool:
 def resolve_vision_provider(stage: str) -> tuple[str, str]:
     """(провайдер, модель) вижна для стадии — СВОЯ настройка, потом общий фолбэк.
 
-    Улов живого теста 25.08: real_photo и сток брали провайдера у ютуб-селектора
-    (`YOUTUBE_SELECTOR_PROVIDER`), а он у пользователя стоит в «auto» и
-    разворачивается в режиссёрский бэкенд; если тот не chat-провайдер, вижн молча
-    не вызывался — стадия брала первого кандидата и никто этого не видел.
       • real_photo / epf → REAL_PHOTO_VISION_PROVIDER + REAL_PHOTO_VISION_MODEL
       • stock            → STOCK_VISION_PROVIDER + STOCK_VISION_MODEL, пусто =
                            «как у Real Photo»
-    Последний фолбэк для обоих — ютуб-селектор (если он задан явно).
     Всё это выбирается в GUI, руками в .env лезть не нужно.
     """
     import params as config
     from units.operator_hub import CLI_AGENTS, _model_for
-    from units.tube_runner import _selector_provider_model
 
     def _pair(provider_key: str, model_key: str) -> tuple[str, str]:
         provider = str(getattr(config, provider_key, "") or "").strip().lower()
@@ -284,7 +344,7 @@ def resolve_vision_provider(stage: str) -> tuple[str, str]:
         provider, model = _pair(provider_key, model_key)
         if provider:
             return provider, model
-    return _selector_provider_model()
+    return "", ""
 
 
 def _ask_vision(provider: str, model: str, task: str, sheet: Path,
@@ -495,7 +555,7 @@ def is_stock_stage(stage: str) -> bool:
 _HOUSE_RULES_FILE = "vision_house_rules.txt"
 
 # Секции по стадиям: пусто/`[all]` — на все стадии, остальные — только на свою.
-_HOUSE_SECTION_STAGES = {"stock": "stock", "real_photo": "real_photo", "youtube": "youtube"}
+_HOUSE_SECTION_STAGES = {"stock": "stock", "real_photo": "real_photo"}
 
 
 def _house_rules_path() -> Path:
@@ -507,7 +567,7 @@ def load_house_rules(stage: str = "", path: Optional[Path] = None) -> list[str]:
     """Строки запретов пользователя для этой стадии. Нет файла — пустой список.
 
     Формат простой: по одному предмету на строку, строки с `#` — комментарии.
-    Необязательные секции `[all]`, `[stock]`, `[real_photo]`, `[youtube]`;
+    Необязательные секции `[all]`, `[stock]`, `[real_photo]`;
     строки до первой секции считаются общими.
     """
     src = Path(path) if path is not None else _house_rules_path()
@@ -623,8 +683,6 @@ def pick_with_vision(
     ранжированием запасным становится ВТОРОЕ МЕСТО по оценке вижна, а не
     случайный уцелевший кандидат.
     """
-    from units.tube_runner import _parse_json_object
-
     from units.operator_hub import CLI_AGENTS
 
     work_dir = Path(work_dir)
