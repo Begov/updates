@@ -223,14 +223,6 @@ def extract_negative_block(style_guide: str) -> Optional[str]:
     return _extract_anchored_block(style_guide, r'NEGATIVE')
 
 
-def extract_style_block(style_guide: str) -> Optional[str]:
-    """Извлекает STYLE-блок из стайлгайда по якорю (питон-регекс).
-
-    Тот же повторяющийся-в-каждом-промпте блок стиля. None если якорной секции нет.
-    """
-    return _extract_anchored_block(style_guide, r'STYLE\s*BLOCK')
-
-
 def build_hardmatch(token: str) -> str:
     """Каноническая hard-match подпись для токена. Имя токена подставляется из него самого
     (нашли [sael_ref.jpg] → подпись про sael_ref.jpg). Шаблон один, привязка через имя."""

@@ -816,32 +816,6 @@ def _target_frame_size(resolution, prescan_height=0):
     return oriented(1280, 720)
 
 
-def _ffmpeg_font_path(p: Path):
-    """Готовит путь к шрифту для ffmpeg drawtext. ffmpeg на Windows НЕ читает fontfile
-    с non-ASCII (кириллическим) путём → 'could not parse fontconfig pat'. Поэтому если путь
-    содержит не-ASCII символы — копируем шрифт в ASCII-temp и отдаём его. Возвращает
-    ffmpeg-escaped путь (двоеточие экранировано)."""
-    try:
-        str(p).encode('ascii')
-        ascii_path = p
-    except UnicodeEncodeError:
-        import tempfile, shutil
-        dst = Path(tempfile.gettempdir()) / f'begoframe_font_{p.name}'
-        try:
-            if not dst.exists() or dst.stat().st_size != p.stat().st_size:
-                shutil.copy2(p, dst)
-            ascii_path = dst
-        except Exception:
-            ascii_path = p  # копия не удалась — отдаём как есть (лучше попытка чем None)
-    return ascii_path.as_posix().replace(':', '\\:')
-
-
-
-
-
-
-
-
 # ── Dip-to-X переходы между клипами ──────────────────────────────────────────
 # Переход применяется НА ГРАНИЦЕ клипа (fade_in/fade_out), но не съедает время и не зависит
 # от соседа: клип сохраняет полную длительность (транзишн «съедает» ровно свою длину внутри

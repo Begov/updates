@@ -246,31 +246,6 @@ def build_contact_sheet(candidates: list[Candidate], output_path: Path) -> Optio
 MIN_FRAME_SIDE = 640
 
 
-def drop_tiny_images(paths: list[Path], *, min_side: int = MIN_FRAME_SIDE) -> tuple[list[Path], list[tuple[Path, str]]]:
-    """(годные, отброшенные) — по фактическому размеру картинки.
-
-    Улов живого прогона 25.08: сцена получила кадр 239×317 — вижн смотрел
-    уменьшенную панель контактного листа и оценить оригинал не мог, а в ролике
-    это мыло во весь экран.
-    """
-    from PIL import Image
-
-    kept: list[Path] = []
-    dropped: list[tuple[Path, str]] = []
-    for path in paths:
-        try:
-            with Image.open(path) as image:
-                width, height = image.size
-        except Exception as exc:                      # noqa: BLE001
-            dropped.append((path, f"не открылся: {exc}"))
-            continue
-        if max(width, height) < min_side:
-            dropped.append((path, f"{width}x{height}"))
-            continue
-        kept.append(path)
-    return kept, dropped
-
-
 def normalize_reasons(value) -> dict[str, str]:
     """Причины вижна в единый вид {candidate_id: текст}.
 

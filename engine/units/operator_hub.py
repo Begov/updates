@@ -22,11 +22,6 @@ logger = logging.getLogger(__name__)
 CLI_AGENTS = ("codex",)
 
 
-def normalize_provider(provider: str) -> str:
-    """Имя оператора к канону. Транспорт один, поэтому любое имя — это Codex."""
-    return "codex"
-
-
 def _model_for(provider: str = "codex") -> str:
     import params as config
     return str(getattr(config, "GPT_MODEL", "") or "").strip()

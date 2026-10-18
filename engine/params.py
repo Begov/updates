@@ -51,8 +51,6 @@ BASE_DIR = Path(__file__).parent
 # Директория с промптами
 PROMPTS_DIR = BASE_DIR / 'instructions'
 
-# Директория для временных файлов
-TEMP_DIR = BASE_DIR / 'temp'
 
 # Директория для логов
 LOGS_DIR = BASE_DIR / 'logs'
@@ -96,8 +94,6 @@ ASSEMBLYAI_SEGMENTATION_MODE = os.getenv('ASSEMBLYAI_SEGMENTATION_MODE', 'senten
 # HTTP timeout for AssemblyAI SDK (seconds). Default 30s is too low for large files on slow connections.
 ASSEMBLYAI_HTTP_TIMEOUT = float(os.getenv('ASSEMBLYAI_HTTP_TIMEOUT', '600'))
 
-# Браузер для cookies yt-dlp: chrome, edge, firefox, opera, brave (пустой = авто-детект)
-YTDLP_COOKIES_BROWSER = os.getenv('YTDLP_COOKIES_BROWSER', '')
 
 # ============================================================================
 # РЕЖИССУРА: ОБЩИЕ НАСТРОЙКИ
@@ -109,8 +105,6 @@ REWRITE_MODEL = os.getenv('REWRITE_MODEL', 'gpt:gpt-5.4-mini')
 # Двухпроходный режим: проход 1 = JSON план, проход 2 = промпты (для длинных проектов)
 DIRECTOR_TWO_PASS = os.getenv('DIRECTOR_TWO_PASS', 'false').lower() in ('true', '1', 'yes')
 
-# Генерация director_analysis.md (по умолчанию включена для отладки)
-GENERATE_DIRECTOR_ANALYSIS = os.getenv('GENERATE_DIRECTOR_ANALYSIS', 'true').lower() in ('true', '1', 'yes')
 
 # Максимальный размер чанка промптов в проходе 2.
 # Если клипов больше — pass 2 разбивается на чанки по PROMPT_CHUNK_SIZE клипов.
@@ -122,8 +116,6 @@ PROMPT_CHUNK_SIZE = int(_chunk_raw) if _chunk_raw.isdigit() else 150
 # THRESHOLD: если audioDuration > этого порога (сек), Pass 1 разбивается на чанки.
 # 0 = всегда монолит (старый режим).
 DIRECTOR_PASS1_CHUNK_THRESHOLD = int(os.getenv('DIRECTOR_PASS1_CHUNK_THRESHOLD', '2400'))
-# Длина одного чанка Pass 1 (сек). 2400 сек = 40 мин, 1200 = 20 мин.
-DIRECTOR_PASS1_CHUNK_DURATION  = int(os.getenv('DIRECTOR_PASS1_CHUNK_DURATION',  '1200'))
 
 # Откат при авто-дополнении (rollback).
 # Continuation loop отсекает последние N "уставших" промптов и просит их заново.
@@ -152,14 +144,6 @@ PASS1_PARALLEL = int(_p1par_raw) if _p1par_raw.isdigit() and int(_p1par_raw) > 0
 # GPT / CODEX DIRECTOR
 # ============================================================================
 
-
-# must_have ЗАМОРОЖЕН (решение 25.08): выкл. → модель его не сочиняет (токены),
-# ютуб-вижн его не получает (жёсткий список может отбраковать всех кандидатов).
-# Поле в схемах/клипах остаётся; вернуть — включить флаг.
-VISUAL_STORY_MUST_HAVE = (
-    os.getenv('VISUAL_STORY_MUST_HAVE', 'false').strip().lower()
-    in ('1', 'true', 'yes', 'on')
-)
 
 # Путь к Codex CLI exe (auto-detect per platform)
 import shutil as _shutil
@@ -245,10 +229,6 @@ STOCK_EXCLUDE_AI = os.getenv('STOCK_EXCLUDE_AI', 'true').lower() in ('true', '1'
 STOCK_LIBRARY_DIR = os.getenv('STOCK_LIBRARY_DIR', '').strip()
 STOCK_PROXY_URL = os.getenv('STOCK_PROXY_URL', '').strip()
 
-# YouTube Footage is an opt-in stage with one explicitly selected source.
-YOUTUBE_FOOTAGE_ENABLED = os.getenv(
-    'YOUTUBE_FOOTAGE_ENABLED', 'false'
-).lower() in ('true', '1', 'yes', 'on')
 
 # Сколько кандидатов берём от КАЖДОГО включённого стока, прежде чем добирать
 # остальными. Обычный режим — три стока сразу, и без квоты лист перекашивал тот,
@@ -361,10 +341,6 @@ def codex_env_for_provider(base_env: dict = None) -> dict:
         env.setdefault('no_proxy', '127.0.0.1,localhost')
     return env
 
-
-# VEO style guide для Codex adapt (дефолт = универсальный, можно заменить в GUI)
-VEO_ADAPT_STYLE_GUIDE = os.getenv('VEO_ADAPT_STYLE_GUIDE',
-    str(BASE_DIR / 'instructions' / 'veo_i2v_universal_style.md'))
 
 # Длина фразы субтитров (для subtitles.srt, выжигаемых конкатом).
 # UNIT=chars → по символам (дефолт 50). UNIT=words → по СЛОВАМ (1 = каждое слово отдельным
@@ -633,8 +609,6 @@ VEONONSTOP_REQUEST_DELAY = float(os.getenv('VEONONSTOP_REQUEST_DELAY', '3.0'))
 # Макс. попыток на шаг генерации (Phase 1 и каждый шаг цепочки при техн. ошибке)
 VEONONSTOP_MAX_RETRIES = int(os.getenv('VEONONSTOP_MAX_RETRIES', '') or '5')
 
-# Макс. server-timeout ретраев на клип (после превышения — тратим попытку, идём к static fallback)
-VEONONSTOP_MAX_TIMEOUT_RETRIES = int(os.getenv('VEONONSTOP_MAX_TIMEOUT_RETRIES', '') or '5')
 
 # Повторные запуски в silent режиме (для клипов с техн. ошибками)
 VEONONSTOP_MAX_SILENT_CYCLES = int(os.getenv('VEONONSTOP_MAX_SILENT_CYCLES', '5'))

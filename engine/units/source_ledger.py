@@ -167,50 +167,6 @@ def _clip_parts_on_disk(project, clip_id: int, clip=None) -> bool:
     return False
 
 
-def final_marker_for(project_dir, clip, stage: str) -> str | None:
-    """Финальный маркер для клипа с УЖЕ готовым файлом.
-
-    `*_pending` означает «стадия ещё не отработала». Когда файл на диске, такой
-    маркер врёт: повторный запуск шлёт стадию искать заново поверх готового.
-
-    Видео в `vid_img/` → видео-маркер стадии, картинка в `generated/` → фото.
-    Стадия неизвестна или файла нет — None, вызывающий не трогает маркер.
-    """
-    from pathlib import Path
-
-    project = Path(project_dir)
-    clip_id = clip.get('id')
-    try:
-        clip_id = int(clip_id)
-    except (TypeError, ValueError):
-        return None
-    if not clip_media_ready(project, clip):
-        return None
-
-    # Расширению в `file` верить нельзя: Pass 1 проставляет ВСЕМ клипам
-    # заглушку вида `10.mp4` ещё до того, как хоть что-то скачано. Видео — это
-    # только реально существующий mp4 (проверено на клипе 10 прогона 26.08:
-    # архивное ФОТО получало маркер `real_video` из-за заглушки).
-    declared = str(clip.get('file') or '').strip()
-    declared_path = (project / declared) if declared else None
-    is_video = bool(
-        (declared_path is not None
-         and declared_path.suffix.lower() == '.mp4'
-         and declared_path.exists())
-        or (project / 'vid_img' / f'{clip_id:03d}.mp4').exists()
-        or _clip_parts_on_disk(project, clip_id, clip)
-    )
-    finals = {
-        'stock': ('stock_video', 'stock_photo'),
-        'infographic': ('infographic', 'infographic'),
-        # Графика бывает только видео
-        'motion_graphics': ('motion_graphics', 'motion_graphics'),
-    }.get(stage)
-    if not finals:
-        return None
-    return finals[0] if is_video else finals[1]
-
-
 def materialize_static_images(project_dir, sources=INFOGRAPHIC_SOURCES, printer=print) -> list[int]:
     """Copy generated stills for static sources into ``vid_img/``.
 
