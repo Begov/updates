@@ -134,12 +134,10 @@ CINAI_MODELS = [
     ("nano-banana-2-lite-flow", "Banana 2 Lite"),
     ("cinai-lite-flash-1-1", "Cin Lite Flash 1.1"),
     ("cinai-g-image", "CinGen Image 1.0"),
-    ("seedream-5-pro-text-2-img", "Seedream 5 Pro"),
 ]
 CINAI_MODEL_DEFAULT = CINAI_MODELS[0][0]
 # Бесплатные модели «картинка → картинка» для ремиксера CinAI
 CINAI_REMIX_MODELS = [
-    ("seedream-5-pro", "Seedream 5 Pro"),
     ("nano-banana-pro-test", "Banana Pro"),
     ("nano-banana-2", "Banana 2"),
     ("cinai-g-image", "CinGen Image 1.0"),

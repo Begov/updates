@@ -80,7 +80,7 @@ python -m venv .venv
    стока идут через Codex (подписка ChatGPT), отдельные ключи для них не нужны.
 3. **CinAI:** «Открыть cinai.tv», войдите на сайте, затем «Забрать сессию из браузера».
    Для картинок и ремиксера в программе доступны только бесплатные модели CinAI — безлимитные
-   на тарифе (Banana Pro, Banana 2, Banana 2 Lite, Cin Lite Flash 1.1, CinGen Image 1.0, Seedream 5 Pro).
+   на тарифе (Banana Pro, Banana 2, Banana 2 Lite, Cin Lite Flash 1.1, CinGen Image 1.0).
    Видео через CinAI — тоже только бесплатные модели (CinGen Video 1.0, Veo 3.1 Fast, Veo 3.1 Lite),
    720p, форматы 16:9 и 9:16.
    Потом сессия продлевается автоматически.

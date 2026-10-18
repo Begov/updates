@@ -823,10 +823,10 @@ CINAI_APP_ID = (os.getenv('CINAI_APP_ID', 'runway-workflows') or 'runway-workflo
 # держал её отключённой («слишком много ошибок подряд») — в список не вошла.
 CINAI_FREE_IMAGE_MODELS = (
     'nano-banana-pro-test', 'nano-banana-2', 'nano-banana-2-lite-flow',
-    'cinai-g-image', 'cinai-lite-flash-1-1', 'seedream-5-pro-text-2-img',
+    'cinai-g-image', 'cinai-lite-flash-1-1',
 )
 # Бесплатные модели «картинка → картинка» для ремиксера (у них есть вход картинки)
-CINAI_FREE_REMIX_MODELS = ('seedream-5-pro', 'nano-banana-pro-test', 'nano-banana-2', 'cinai-g-image')
+CINAI_FREE_REMIX_MODELS = ('nano-banana-pro-test', 'nano-banana-2', 'cinai-g-image')
 
 
 def _cinai_free(value: str, allowed: tuple) -> str:
