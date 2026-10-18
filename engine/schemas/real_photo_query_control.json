@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "selections_path": {
+      "type": "string",
+      "description": "Absolute path to the generated real_photo_queries.json file"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "total_clips": {
+      "type": "integer",
+      "description": "Total number of clips received from director (= queries generated)"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status is error, empty string if ok"
+    }
+  },
+  "required": ["selections_path", "status", "total_clips", "error_message"]
+}

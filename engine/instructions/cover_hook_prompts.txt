@@ -1,0 +1,65 @@
+ОЖИВЛЕНИЕ ОБЛОЖКИ — первый кадр ролика
+
+Зритель кликнул на обложку и сразу видит её же, только ожившую. Кадр, который
+он выбрал глазами, продолжается в движении — это держит первые секунды.
+
+Промпт выбирается настройкой «Обложка: режим» рядом с интро-блоком. Правьте
+тексты под себя: файл не перезаписывается обновлениями.
+
+Главное правило для всех режимов: обложка должна ОСТАТЬСЯ УЗНАВАЕМОЙ. Зритель
+только что видел её в ленте — если картинка уедет в сторону или сменит вид,
+эффект узнавания пропадёт, а вместе с ним и смысл затеи.
+
+--------------------------------------------------------
+ПРОМПТ 1 — НАЕЗД (zoom_in)
+--------------------------------------------------------
+
+A slow cinematic push-in on this exact image: the camera creeps forward,
+the frame tightens by a few percent over the shot. Everything stays in place —
+same composition, same subject, same lighting, same colour grade and grain.
+The move is gentle and continuous, no easing at the end, no cut, no shake.
+Photoreal, identical to the source frame.
+
+
+--------------------------------------------------------
+ПРОМПТ 2 — ОТЪЕЗД (zoom_out)
+--------------------------------------------------------
+
+A slow cinematic pull-back from this exact image: the camera drifts backwards,
+revealing a little more of the scene at the edges. The subject keeps its place
+in the frame and stays fully visible the whole time. Same composition, lighting,
+colour grade and grain as the source. Smooth continuous move, no cut, no shake.
+Photoreal.
+
+
+--------------------------------------------------------
+ПРОМПТ 3 — ДРЕЙФ (drift)
+--------------------------------------------------------
+
+The camera glides slowly sideways past this exact scene, giving it real depth:
+foreground shifts a touch faster than background. The photographed content
+itself is frozen — nobody moves, nothing changes shape or place. Framing stays
+centred on the same subject. Same lighting, colour grade and grain as the
+source. Photoreal, one steady move, no cut.
+
+
+--------------------------------------------------------
+ПРОМПТ 4 — ЗАЛЁТ В СЦЕНУ (fly_in)
+--------------------------------------------------------
+
+The camera flies forward INTO this exact scene, travelling through its depth
+past the foreground toward the main subject, as if entering the picture.
+The world inside is static geometry — nothing moves on its own. The subject
+stays centred and recognisable throughout. Same lighting, colour grade and
+grain as the source. Photoreal, one continuous move, no cut.
+
+
+--------------------------------------------------------
+ПРОМПТ 5 — ОЖИВАНИЕ (awaken)
+--------------------------------------------------------
+
+This exact frame comes alive: what would naturally move begins to move —
+hair and fabric stir, steam and dust drift, water ripples, light flickers,
+eyes blink. The camera itself barely moves. Composition, subject, pose,
+lighting and colour grade stay exactly as in the source: the picture must
+still read as the same image, only breathing. Photoreal, subtle, no cut.

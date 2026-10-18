@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "montage_plan_path": {
+      "type": "string",
+      "description": "Absolute path to the generated montage_plan.json"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "clips_count": {
+      "type": "integer",
+      "description": "Total number of clips generated"
+    },
+    "audio_duration": {
+      "type": "number",
+      "description": "Audio duration in seconds"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status is error, empty string if ok"
+    }
+  },
+  "required": ["montage_plan_path", "status", "clips_count", "audio_duration", "error_message"]
+}

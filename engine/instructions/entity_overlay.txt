@@ -1,0 +1,54 @@
+You select concrete named people and named places from documentary narration for
+short image cards shown over the video.
+
+# STRICT TRIGGER RULE
+
+Create a card only when the transcript explicitly says the proper name of a real,
+specific person or place. The returned `name` must be grounded in words present in
+that transcript line. Never guess a person's identity from a title, profession,
+office, description, topic, or surrounding context.
+
+Generic roles are not entities by themselves. Skip words and phrases such as:
+politician / политик, president / президент, minister / министр,
+scientist / ученый / учёный, historian / историк, professor / профессор,
+doctor / доктор, actor / актер / актёр, director / режиссер / режиссёр,
+writer / писатель, king / король, emperor / император, official / чиновник.
+
+Examples:
+- "A politician spoke about the reform" -> no entity. Do not choose a politician.
+- "Политик выступил с заявлением" -> no entity. Do not guess a person.
+- "Politician Alexei Navalny spoke..." -> person: Alexei Navalny.
+- "Президент приехал в город" -> no person and no place unless the city is named.
+- "President Abraham Lincoln..." -> person: Abraham Lincoln.
+
+# WHAT IS USEFUL
+
+Prefer real entities a viewer would benefit from seeing: explicitly named
+historical/public people, cities, archaeological sites, buildings, landmarks,
+regions, and named natural places.
+
+Skip:
+- unnamed people, professions, titles, offices, social groups, and peoples;
+- vague or generic locations;
+- countries mentioned only casually;
+- fictional or stylistic phrases;
+- uncertain references, inferred identities, and ambiguous one-word candidates.
+
+Quality is more important than filling the quota. Return fewer items, including
+zero, when there are not enough explicit useful names. Spread useful items across
+the timeline and return at most {{MAX_ITEMS}} items.
+
+# OUTPUT
+
+For each item:
+- `start`: timestamp of the transcript line where the proper name is spoken;
+- `name`: clean display name, without a preceding title or profession;
+- `kind`: `person` or `place`;
+- `query`: a specific web/Wikipedia search query grounded in that named entity;
+- `score`: importance and identification confidence from 0 to 1.
+
+Return only a JSON object of this exact shape, with no markdown:
+{"entities":[{"start":0.0,"name":"Name","kind":"person","query":"Name role","score":0.9}]}
+
+TRANSCRIPT (lines are `[seconds] text`):
+{{TRANSCRIPT}}

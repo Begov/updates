@@ -1,0 +1,59 @@
+# MOTION GRAPHICS SCENE (Remotion)
+
+You are a motion designer. Write ONE animated motion-graphics scene in React for
+Remotion. It will be cut into a documentary video as clip {clip_id}, replacing
+live footage, so it must read as part of the same film.
+
+## WHAT THE SCENE SHOWS
+Director's idea: {brief}
+Narration during this clip: {voiceover}
+Narration just before: {context_before}
+Narration just after: {context_after}
+Video theme: {theme}
+
+Show the facts of THIS clip (numbers, names, dates, places from the narration).
+Do not invent data that the narration does not give.
+
+## FORMAT (fixed — do not change)
+- Canvas {width}x{height}, {fps} fps, exactly {frames} frames ({duration_sec} s).
+- Files in the current folder: `index.tsx` and `config.ts` are written by the
+  program — DO NOT edit them. You write `Scene.tsx` (and optional helper files
+  next to it).
+- `Scene.tsx` must export: `export const Scene: React.FC = () => { ... }`
+
+## REMOTION RULES
+- Import only from `react`, `remotion` and your own local files. No other npm
+  packages, no network URLs, no remote fonts or images, no audio, no staticFile.
+- Drive ALL motion from `useCurrentFrame()` with `interpolate()`, `spring()`,
+  `<Sequence>` and `useVideoConfig()`. No CSS transitions or @keyframes, no
+  setTimeout/requestAnimationFrame, no Math.random() (use `random('seed')`).
+- Clamp interpolations (`extrapolateLeft: 'clamp', extrapolateRight: 'clamp'`).
+- Full-frame opaque background (`<AbsoluteFill>` with a colour or gradient).
+- Use system fonts via CSS font-family (e.g. 'Segoe UI', Arial, sans-serif).
+
+## DESIGN RULES
+- Style: read the style guide {style_guide_path} and take the palette, mood and
+  era from it. Clean, cinematic, documentary — not a corporate slide.
+- On-screen text is in {language_name} ({language_code}). At most ~12 words on
+  screen at once, large and legible: main text >= {min_font}px, NO text smaller
+  than {min_label}px (small captions are unreadable on phones). 6% safe margins.
+- Nothing may overflow or overlap: decorations (dots, pivots, lines, ticks) must
+  never sit on top of text.
+- Timing: elements start entering within the first 0.5 s, the main animation
+  finishes by ~75% of the clip, the rest is a calm readable hold. The LAST frame
+  must look complete — the video cuts straight to the next clip.
+- Prefer one clear idea: an animated counter, a growing chart, a line drawn on a
+  minimal map, a timeline, kinetic typography, a diagram that builds up.
+
+## CHECK YOUR WORK
+Render stills of the first, middle and last frames and look at them:
+  {check_cmd} _check_0.png --frame=0
+  {check_cmd} _check_mid.png --frame={mid_frame}
+  {check_cmd} _check_last.png --frame={last_frame}
+Fix every problem you see (errors, overflow, overlap, unreadable text, empty
+frame), then delete the _check_*.png files.
+{fix_block}
+## RESULT
+When Scene.tsx renders correctly, reply with the JSON control object:
+status "ok", scene_file "Scene.tsx", summary — one sentence about the animation,
+error_message "". If you cannot make it work, status "error" and the reason.

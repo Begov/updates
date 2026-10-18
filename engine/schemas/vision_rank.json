@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "ranked_candidate_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "EVERY supplied candidate_id exactly once, best first"
+    },
+    "rejected_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "candidate_id of footage that does not fit this scene at all"
+    },
+    "reasons": {
+      "type": "array",
+      "description": "one short visual reason per candidate; the top-ranked one is mandatory",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "required": ["candidate_id", "reason"]
+      }
+    }
+  },
+  "required": ["ranked_candidate_ids", "rejected_ids", "reasons"]
+}

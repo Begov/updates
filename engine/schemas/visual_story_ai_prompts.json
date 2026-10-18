@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scene_id": {"type": "integer"},
+          "prompt": {"type": "string"}
+        },
+        "required": ["scene_id", "prompt"]
+      }
+    }
+  },
+  "required": ["prompts"]
+}

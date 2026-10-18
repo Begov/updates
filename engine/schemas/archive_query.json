@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Image-search query naming the main subject of the scene: 3-6 English words, no punctuation, no quotes"
+    }
+  },
+  "required": ["query"]
+}

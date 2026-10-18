@@ -1,0 +1,19 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "output_path": {
+      "type": "string",
+      "description": "Absolute path to the written style_extract.json with {style_block, negative_block}"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status is error, empty string if ok"
+    }
+  },
+  "required": ["output_path", "status", "error_message"]
+}

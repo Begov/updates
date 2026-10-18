@@ -1,0 +1,175 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "global_summary": {
+      "type": "string"
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "scene_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "active_entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "hidden_entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revealed_entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "scene_ids",
+          "active_entities",
+          "hidden_entities",
+          "revealed_entities"
+        ]
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "first_appearance_scene": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label",
+          "description",
+          "first_appearance_scene"
+        ]
+      }
+    },
+    "scene_overrides": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "scene_id": {
+            "type": "integer"
+          },
+          "resolved_references": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "phrase": {
+                  "type": "string"
+                },
+                "entity_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "phrase",
+                "entity_id"
+              ]
+            }
+          },
+          "continuity_constraints": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "keep_entities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "same_location_as_scene": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "time_of_day": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "must_not_reveal": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "keep_entities",
+              "same_location_as_scene",
+              "time_of_day",
+              "must_not_reveal",
+              "notes"
+            ]
+          }
+        },
+        "required": [
+          "scene_id",
+          "resolved_references",
+          "continuity_constraints"
+        ]
+      }
+    }
+  },
+  "required": [
+    "global_summary",
+    "chapters",
+    "entities",
+    "scene_overrides"
+  ]
+}

@@ -1,0 +1,40 @@
+__pycache__/
+*.pyc
+.venv/
+engine/.env
+projects/
+inbox/
+runtime/
+userdata/
+
+# Секреты: любые .env, кроме примера
+.env
+.env.*
+!engine/.env.example
+
+# Журналы и отчёты, которые пишет программа при работе
+*.log
+engine/logs/
+errors.json
+_stock_prompt/
+engine/active_tasks.json
+
+# Резервные и временные файлы
+*.bak
+*.tmp
+bego_*.json
+
+# IDE и ОС
+.vscode/
+.idea/
+.claude/
+Thumbs.db
+.DS_Store
+
+# Кэши и сборка
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/

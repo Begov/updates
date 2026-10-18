@@ -1,0 +1,25 @@
+# BegoFrame — зависимости Python (3.11+; проверено на 3.14)
+# Установка:  python -m pip install -r requirements.txt
+# Кроме пакетов нужен FFmpeg (ffmpeg и ffprobe в PATH) — см. README.md
+
+# Интерфейс
+PySide6>=6.6,<7.0
+PySide6-Fluent-Widgets>=1.7,<2.0   # оформление в стиле Windows 11 (лицензия GPLv3 — для личного использования)
+
+# Сеть и API
+requests>=2.31,<3.0
+certifi>=2024.0.0
+python-dotenv>=1.0,<2.0
+
+# Расшифровка речи
+assemblyai>=0.35,<1.0
+
+# Изображения и служебное
+Pillow>=10.0,<13.0
+filelock>=3.12,<4.0
+tqdm>=4.66,<5.0
+colorama>=0.4.6,<1.0
+
+# Необязательно: браузерный транспорт CinAI (CINAI_TRANSPORT=browser).
+# После установки выполнить:  python -m playwright install chromium
+# playwright>=1.45

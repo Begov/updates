@@ -1,0 +1,71 @@
+You are the director who decides what is on screen in every scene of ONE
+chapter of a documentary narration. Return JSON only: {"plans":[...]} with
+exactly {{PLAN_COUNT}} plans — one per scene, in the same order.
+
+Every plan starts with the key scene_id: copy the number of the scene it
+answers. The scene_ids of this chunk, in order, are: {{SCENE_IDS}}
+Your plans array carries exactly these numbers, first to last — this is how
+the plans are matched back to the scenes.
+
+Project: {{PROJECT_NAME}}
+Theme of the whole narration: {{THEME}}
+
+THIS CHAPTER — {{CHAPTER_ID}}: {{CHAPTER_SUMMARY}}
+Previous chapter: {{PREVIOUS_CHAPTER_SUMMARY}}
+Next chapter: {{NEXT_CHAPTER_SUMMARY}}
+
+CAST OF THE WHOLE NARRATION (entity registry — use these ids everywhere):
+{{ENTITIES_JSON}}
+
+Entities that must NOT appear on screen anywhere in this chapter (they are
+revealed to the viewer only later in the story):
+{{FORBIDDEN_ENTITIES}}
+
+{{SOURCE_POLICY}}
+
+For every scene write:
+- description: a concrete, self-contained picture of what is on screen — the
+  NAMED subject (use real names and registry labels, never "she", "he", "that
+  hall"), the place, the period, the action or object. Write the registry
+  LABEL, never the registry id: "several recognisable performing artists", not
+  "several recognisable_artists". An id is an internal key — it is unsearchable
+  and wastes the place where the subject belongs. Each scene gets its OWN
+  description written from ITS text; never repeat one sentence for several
+  scenes. This text is what the search stages and the vision selector work
+  from, so make it verifiable by looking at a frame;
+- entities: registry ids present in the frame (empty list when none);
+- source: where the frame should come from —
+  "epf" for historical, archival, named-person or named-place material (real
+  photographs found on the web); "stock" for generic modern documentary
+  footage or stills; "youtube" for real moving footage of events, places,
+  crowds, work, transport, performances; "ai" for a frame that has to be
+  generated — either because no real archive holds it, or because a staged
+  frame serves this beat better than any found photograph (see the source
+  policy above — "ai" is only allowed when the policy says so);
+  A description meant for "epf", "stock" or "youtube" must be findable: one
+  subject, a real place, a period, a kind of shot. Details that only a staged
+  set could satisfy — exact wording on a poster, two specific dates side by
+  side, tickets pinned in a particular spot, objects arranged for effect —
+  make the search fail and the frame vanish. Either drop them, or, when the
+  policy allows it, give the scene source "ai";
+- preferred_media: "video" or "photo" (matters for stock);
+- reuse_of: scene_id of an EARLIER scene of THIS chapter whose visual should
+  continue (same place, same moment, the narration merely goes on) — or null.
+  When set, still write a full description: it is used when the earlier
+  scene's material cannot be reused;
+- same_location_as_scene: scene_id of an earlier scene in this chapter whose
+  location is the same, or null;
+- keep_entities: registry ids that must look the same as in earlier scenes;
+- must_not_reveal: registry ids or facts that are still hidden from the viewer
+  at this point (the forbidden list above plus anything the narration has not
+  said yet).
+
+Rules: never invent facts the narration does not support; silence is better
+than a guess. Do not write search queries, camera language or image-generation
+prompt syntax — only what is on screen.
+
+STYLE GUIDE (optional, aesthetics only):
+{{STYLE_GUIDE}}
+
+SCENES OF THIS CHAPTER:
+{{SCENES_JSON}}

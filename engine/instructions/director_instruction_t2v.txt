@@ -1,0 +1,16 @@
+Write prompts for direct text-to-video generation, not only for a still image.
+
+Each prompt must begin with a concrete visual setup that can create the first
+frame: subject, environment, time of day, lighting, wardrobe/props and style.
+Then explicitly direct the video: camera framing and angle, camera movement,
+the subject's visible action, and how the action or reveal develops from the
+first second to the planned end of the clip. Make the key event readable early.
+
+Use a purposeful shot choice such as wide, medium, close-up, over-the-shoulder,
+low angle, high angle or POV, and vary adjacent shots. Describe one coherent
+continuous shot per clip: no unexplained cuts, montages, time jumps or multiple
+unrelated actions. Keep motion physically plausible and tied to the voiceover.
+
+For the intro-I2V-plus-T2V route these prompts are also used to make the intro
+still images, so preserve a strong, unambiguous opening composition before
+describing camera movement and temporal progression.

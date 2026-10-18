@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "pick": {
+      "type": ["string", "null"],
+      "description": "candidate_id of the single best candidate, or null when none of them fits the scene brief"
+    },
+    "rejected_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "candidate_id of every rejected candidate; when pick is null this lists ALL of them"
+    },
+    "reasons": {
+      "type": "array",
+      "description": "one short visual reason per candidate, the picked one included",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "reason": {"type": "string"}
+        },
+        "required": ["candidate_id", "reason"]
+      }
+    }
+  },
+  "required": ["pick", "rejected_ids", "reasons"]
+}

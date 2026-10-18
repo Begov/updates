@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "clips": {
+      "type": "array",
+      "description": "One entry per candidate clip",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "integer", "description": "Clip id exactly as given in the request"},
+          "source": {
+            "type": "string",
+            "enum": ["stock", "infographic", "motion_graphics", "hold"],
+            "description": "The source that fits the clip best; hold when none fits"
+          },
+          "brief": {
+            "type": "string",
+            "description": "For motion_graphics: one English sentence - what the animation shows (the data, labels and the motion). Empty string otherwise"
+          }
+        },
+        "required": ["id", "source", "brief"]
+      }
+    }
+  },
+  "required": ["clips"]
+}

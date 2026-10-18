@@ -1,0 +1,12 @@
+{
+  "name": "bego-motion-graphics",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Remotion workspace for BegoFrame motion graphics (copied to runtime/remotion by helpers/remotion_setup.py)",
+  "dependencies": {
+    "@remotion/cli": "4.0.533",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.533"
+  }
+}

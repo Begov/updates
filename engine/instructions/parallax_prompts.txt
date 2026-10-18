@@ -1,0 +1,19 @@
+--------------------------------------------------------
+ПРОМПТ 1 — ОСНОВНОЙ (сбалансированный)
+--------------------------------------------------------
+
+The photograph stays exactly as it is — nobody and nothing in it moves. The only thing that moves is the camera: a slow steady tracking shot, trucking sideways past the scene and revealing its depth. Photoreal, same framing, lighting and grain as the source.
+
+
+--------------------------------------------------------
+ПРОМПТ 2 — ЖЁСТКИЙ (когда всё ещё срывается в pan/zoom или оживляет людей)
+--------------------------------------------------------
+
+The photograph is a frozen sculpture: nobody walks, turns, blinks, breathes or gestures, nothing shifts or changes shape. The only thing that moves is the camera, on one slow steady arc gliding around the scene. Photoreal, same framing, lighting and grain as the source. No pan, no zoom.
+
+
+--------------------------------------------------------
+ПРОМПТ 3 — МЕХАНИЧЕСКИЙ (без слова parallax, чисто через физику)
+--------------------------------------------------------
+
+Simulate a real camera physically moving past this scene: a slow steady dolly forward through its depth, giving true depth parallax. The photographed content is static geometry — nobody moves, nothing changes shape or place. Photoreal, same framing, light, colour grade and film grain as the source.

@@ -1,0 +1,36 @@
+Rephrase this cinematic image/video prompt using varied vocabulary and alternative phrasing while keeping the exact visual scene intact.
+
+Requirements:
+1. If the prompt contains a personal name (real public figure OR a fictional character given a first/last name like "John Smith" or "Saeed al-Maamari") — remove the name and replace the person reference with role + gender + one visual anchor (e.g. "a middle-aged male METOC officer in khaki service shirt", "an elderly Omani hydrographer with a grey beard", "a female TACCO in flight suit with dark hair pulled back"). Do NOT keep the name anywhere in the rewritten prompt.
+
+2. **CRITICAL — never use placeholder tokens inside the text.** If the original has something like `[HYDROGRAPHER: SAEED]`, `[CAPTAIN: VARNER]`, `said "EMIL, come here"` — rewrite by REMOVING the name entirely and leaving ONLY the role, not by substituting placeholders. Forbidden outputs (these would be rendered literally as text in the image):
+   - `[HYDROGRAPHER: [REDACTED]]` ← WRONG — "REDACTED" will appear on screen
+   - `[HYDROGRAPHER: XXX]` ← WRONG
+   - `[CAPTAIN: NAME]` ← WRONG
+   - `said "[REDACTED], come here"` ← WRONG
+   - `"[CENSORED]"` ← WRONG
+   Correct:
+   - `[HYDROGRAPHER] OMAN NAVY RET | STATUS: JUDGMENT CALL` ← role only, no name
+   - `[CAPTAIN] VP-45 | STATUS: DISCLOSING` ← role only
+   - `said "come here"` ← dropped the vocative name
+   Apply this to HUD subject/object markers, speech bubbles, narrator captions, panel titles, location stickers — any text that will be rendered inside the image.
+
+3. If the prompt depicts dramatic or intense action — reframe it cinematically. Show tension, posture, and aftermath rather than the raw mechanics of the moment. Emphasize emotional weight and atmosphere. Keep the dramatic mood intact.
+
+4. Neutralize ambiguous elements:
+   - Copyrighted characters, brand logos, trademarked designs — describe the visual generically.
+   - Political symbols or flags — describe visually without naming the political entity.
+   - Age-ambiguous subjects — clearly describe them as adults 25-35 years old with mature appearance.
+   - Real location names associated with tragedy — keep the visual, rephrase the context neutrally.
+   - Ship names / vessel names that are specific (e.g. "USS Benjamin Stoddert", "HMS Victory") — replace with generic type ("a US Navy destroyer", "a 19th-century warship").
+
+5. Simplify overly complex, contradictory, or confused scene instructions so that a single clear visual reading remains.
+
+6. The output must be textually different from the input.
+
+Output rules:
+- Keep scene composition, camera angle, lighting, color palette, visual style, and setting EXACTLY.
+- Return ONLY the rephrased prompt. No preamble, no commentary.
+- No censorship placeholders (REDACTED / CENSORED / XXX / NAME / ***) — these would be rendered as literal on-screen text.
+
+Prompt: {original_prompt}

@@ -1,0 +1,85 @@
+You are a film director writing visual prompts for image generation.
+
+## STYLE GUIDE
+{style_guide}
+{plot_section}{prev_section}
+## CLIPS TO PROCESS ({n_clips} clips, {from_id}–{to_id} out of {total_clips} total)
+
+{clip_block}
+
+## TASK
+Write one visual image-generation prompt per clip. You are writing prompts for an AI image generator (Banana/Imagen/DALL-E class). The generator does NOT understand narrative text — it needs a precise visual description of a single frozen frame.
+
+⚠️ CRITICAL: DO NOT copy, quote, paraphrase, or embed the voiceover text into the prompt. DO NOT write "visualize this narrated moment:" followed by the script text. The voiceover tells you WHAT IS HAPPENING — your job is to describe WHAT THE CAMERA SEES as a detailed visual composition for an AI image generator.
+
+The image generator does NOT understand narrative text, foreign languages, or abstract concepts. It ONLY understands concrete visual descriptions in English: objects, people, lighting, textures, colors, composition.
+
+## INFOGRAPHIC CLIPS
+
+When a clip card says `SOURCE: INFOGRAPHIC`, write a single static infographic prompt instead of the normal cinematic prompt. It must translate that clip's voiceover into one clear diagram, timeline, chart, comparison, map, labelled process, or data composition. Use the style guide's explicit infographic section when it has one; otherwise use this editable default:
+
+{infographic_default_style}
+
+For infographic clips: do not describe a camera, people acting, cinematic lighting, motion, lens effects, a film scene, or a 3D render. Prioritize legible hierarchy, large readable labels, correct relationships, and enough empty space. Use only short necessary text in the image. Do not append `single full-frame continuous camera view edge-to-edge`.
+
+## PROMPT STRUCTURE
+
+Each prompt MUST follow this block structure as ONE continuous line:
+
+`[PERIOD, YEAR] [LOCATION] [CAMERA ANGLE]: [PRIMARY SUBJECT — appearance, posture, clothing, expression, action] [SUBJECT MOOD — emotion visible in body language] [SECONDARY ELEMENTS — other people, objects, props in frame] [SCENE INTERACTION — what is happening between elements] [LIGHTING & ATMOSPHERE] [STYLE from style guide] [NEGATIVE PROMPT from style guide]`
+
+### BLOCK-BY-BLOCK GUIDE:
+
+1. **PERIOD & SETTING** — historical era, year range, geographic region (e.g. "Colonial Caribbean, 1695", "Viking-era North Atlantic, 900 AD")
+2. **LOCATION** — specific place, not generic (e.g. "cramped below-deck chart room of a weathered brig, salt-stained oak walls, low ceiling with hanging lanterns" — NOT just "a ship")
+3. **CAMERA ANGLE** — from style guide rotation: wide, medium, close-up, cycle
+4. **PRIMARY SUBJECT** — who/what is center-frame. Describe VISUALLY: age, build, skin, clothing fabric, hair, facial expression, hand position, posture, specific action (e.g. "a gaunt 40-year-old navigator in a salt-crusted linen coat, squinting through a brass cross-staff aimed at Polaris, deep sun-creases around his eyes")
+5. **SUBJECT MOOD & INTENT** — emotion shown through VISIBLE body language (e.g. "tense concentration, jaw clenched, knuckles white on the instrument" — NOT "he feels worried")
+6. **SECONDARY ELEMENTS** — other people, objects, props visible (e.g. "two sleeping crew members in rope hammocks behind him, a tallow candle guttering on the chart table, an unrolled parchment map weighted down with a compass")
+7. **SCENE INTERACTION** — the core visual action or tension between elements (e.g. "his finger traces a line on the map while his eyes dart between the star and the horizon")
+8. **LIGHTING & ATMOSPHERE** — light source, color temperature, mood (e.g. "cold silver starlight from above mixing with warm amber lantern glow from below, sea mist diffusing the edges")
+9. **STYLE** — from style guide: photorealistic, textures, depth of field, composition
+10. **NEGATIVE PROMPT** — from style guide: what to avoid
+
+### GOOD EXAMPLE:
+```
+Colonial Caribbean, 1695. Cramped below-deck chart room of a weathered pirate brig, salt-stained oak planks, low ceiling with a swinging oil lantern. Close-up shot. A gaunt 40-year-old navigator in a threadbare linen shirt, deep sun-creases around squinting eyes, calloused fingers gripping a brass divider against a yellowed parchment sea chart. Intense focus, lips pressed thin, brow furrowed — a man calculating whether 200 lives survive tomorrow. Behind him: a half-empty hourglass, a knotted rope log-line coiled on a nail, a crude wooden cross-staff leaning against the bulkhead. His divider tip rests on an ink-drawn coastline while his gaze measures the distance to a question mark labeled "aquí hay monstruos." Warm amber lantern glow from above, cool blue moonlight leaking through a deck seam, cigarette-thick dust motes in the light shaft. Photorealistic prestige-TV composition, tactile salt-worn surfaces, shallow depth of field on the divider tip. No modern instruments, no GPS, no clean surfaces, no fantasy elements, single full-frame continuous camera view edge-to-edge
+```
+
+### BAD EXAMPLE (DO NOT DO THIS):
+```
+Cinematic scene, visualize only this narrated moment: Imagina que es medianoche. El barco cruje bajo tus pies. ❌ THIS IS SCRIPT TEXT, NOT A VISUAL PROMPT
+```
+
+## DIVERSITY RULES:
+- For normal clips and CHAIN HEAD clips, each prompt MUST show a DIFFERENT visual composition — change location, subject, framing, or action
+- For normal clips and CHAIN HEAD clips, NEVER repeat the same establishing shot for consecutive clips
+- For normal clips and CHAIN HEAD clips, if 3 consecutive clips discuss the same topic, show it from 3 different angles: environment, character, object detail
+- For normal clips and CHAIN HEAD clips, vary between: landscape/environment, character portrait, object close-up, action moment, atmospheric wide
+- CHAIN EXTEND clips are the exception: do NOT force visual diversity, new framing, new shot type, or a different angle. Follow the CHAIN STORY MODE instructions instead.
+- Every normal prompt must be >50 words of visual description (not counting negative prompt). Infographic prompts may be shorter when that improves clarity.
+- NO "Narration:" tags, NO voiceover text, NO script quotes, NO comments about duration
+
+LANGUAGE: Write ALL prompts in English regardless of voiceover language.
+{chain_hint}
+⚠️ SEQUENTIAL PROCESSING — MANDATORY:
+Process each [CLIP] block in the EXACT order listed above. For each one, read its VOICEOVER, then write ONE prompt that visually illustrates what that voiceover describes. Do NOT reorganize, group, or batch prompts by topic, era, or style guide section. The style guide is a LOOKUP REFERENCE for visual treatment — not a generation plan.
+
+STRICT OUTPUT RULES:
+- Each prompt = ONE continuous line, no line breaks inside the prompt
+- Prompts separated by ONE blank line between them
+- Exactly {n_clips} prompts, one per clip
+- Each prompt MUST start with the clip header copied from input, e.g. [CLIP 47] (exactly as written in the [CLIP N] header above)
+- Camera angle rotation: wide, medium, close-up, wide (cycle) for normal clips and CHAIN HEAD clips only. CHAIN EXTEND clips must ignore this rotation and must not use shot-type labels.
+- Normal prompts must end with: "single full-frame continuous camera view edge-to-edge". Infographic prompts must not use this ending.
+
+⚠️ CRITICAL OUTPUT INSTRUCTION:
+Do NOT create files. Do NOT run shell commands.
+Return your answer as a STRICT JSON object without markdown:
+{"prompts":["[CLIP {from_id}] prompt text","[CLIP next_id] prompt text",...,"[CLIP {to_id}] prompt text"]}
+The "prompts" array must have exactly {n_clips} non-empty strings. Each element MUST start with [CLIP N] matching the input clip header.
+
+---
+
+**Version:** 3.0
+**Date:** 16 April 2026

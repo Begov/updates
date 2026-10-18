@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "error"],
+      "description": "done when all prompts written, error if failed"
+    }
+  },
+  "required": ["status"]
+}

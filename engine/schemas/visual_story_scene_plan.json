@@ -1,0 +1,92 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "theme": {
+      "type": "string",
+      "description": "One sentence: genre, main subject, setting/period of the whole narration"
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "word_start_index": {
+            "type": "integer"
+          },
+          "word_end_index": {
+            "type": "integer"
+          },
+          "scene_role": {
+            "type": "string"
+          },
+          "chapter_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "word_start_index",
+          "word_end_index",
+          "scene_role",
+          "chapter_id"
+        ]
+      }
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary"
+        ]
+      }
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "first_appearance_word_index": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label",
+          "first_appearance_word_index"
+        ]
+      }
+    }
+  },
+  "required": [
+    "theme",
+    "scenes",
+    "chapters",
+    "entities"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "result_path": {
+      "type": "string",
+      "description": "Absolute path of the JSON file that was written"
+    },
+    "item_count": {
+      "type": "integer",
+      "description": "Number of top-level items written (scenes, plans, ...)"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status is error, empty string if ok"
+    }
+  },
+  "required": ["status", "result_path", "item_count", "error_message"]
+}

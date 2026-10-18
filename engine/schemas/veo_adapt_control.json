@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "output_file_path": {
+      "type": "string",
+      "description": "Absolute path to the adapted VEO prompts file"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "prompts_adapted": {
+      "type": "integer",
+      "description": "Number of prompts adapted"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status=error, empty string if ok"
+    }
+  },
+  "required": ["output_file_path", "status", "prompts_adapted", "error_message"]
+}

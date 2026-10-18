@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error"]
+    },
+    "scene_file": {
+      "type": "string",
+      "description": "Name of the file that exports the Scene component (normally Scene.tsx)"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One sentence: what the animation shows"
+    },
+    "error_message": {
+      "type": "string",
+      "description": "Error details if status=error, empty string if ok"
+    }
+  },
+  "required": ["status", "scene_file", "summary", "error_message"]
+}
