@@ -28,13 +28,11 @@ stock_stage.py — стадия подстановки сток-материал
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from datetime import datetime
 import re
 import shutil
-import subprocess
 import threading
 import time
 import urllib.error
@@ -44,45 +42,13 @@ from typing import Any, Dict, List, Optional
 
 import params as config
 from units.source_ledger import STOCK_SOURCES
-from units.footage_trimmer import cut_footage, probe_video
+from units.footage_trimmer import cut_footage
 from units.stock_lookup import (StockResult, rank_stock, search_source, _words,
-                                  DURATION_MARGIN, VIDEO_EXTS, PHOTO_EXTS,
-                                  LENGTH_FILTER_SOURCES, pexels_configured)
+                                  DURATION_MARGIN, VIDEO_EXTS, PHOTO_EXTS, pexels_configured)
 
 logger = logging.getLogger(__name__)
 
 _PHOTO_EXT_RE = re.compile(r'\.(jpg|jpeg|png|webp)(\?|$)', re.I)
-# Оплаченные мастера платных стоков. ОБЩАЯ папка на всю установку, а не
-# проектная: загрузка списана из суточной квоты, и тот же ролик одинаково годен
-# любому проекту. Отсюда режутся фрагменты; сам мастер не удаляется никогда.
-_MASTERS_DIR = Path(__file__).resolve().parents[2] / 'runtime' / 'stock_masters'
-_SLUG_RE = re.compile(r'[^a-z0-9]+')
-
-
-def _master_name(cand: StockResult) -> str:
-    """Имя оплаченного мастера на диске — читаемое, а не хеш.
-
-    В адресе Envato уже лежит человеческий слаг вместе с кодом
-    (`/cutting-cheese-curds-F5LB763`), поэтому берём последний сегмент адреса:
-    в папке видно, ЧТО за ролик куплен, и код ассета остаётся в имени, а
-    значит имя стабильно между прогонами. Не разобрали адрес — падаем на
-    отпечаток, но это крайний случай, а не норма.
-    """
-    tail = str(cand.url or '').rstrip('/').rsplit('/', 1)[-1]
-    slug = _SLUG_RE.sub('-', tail.lower()).strip('-')[:80]
-    asset = str(cand.asset_id or '').strip()
-    if slug and asset and asset.lower() not in slug:
-        slug = f'{slug}-{asset}'
-    if slug:
-        return slug
-    if asset:
-        return asset
-    return hashlib.sha1((cand.url or '').encode('utf-8')).hexdigest()[:16]
-# Ниже этой границы фильтр длины источнику не отправляем — роликов короче в
-# выдаче почти нет, и просьба ничего не меняет (замер 01.09).
-_MIN_LENGTH_FILTER_SEC = 2
-
-
 def _scene_brief(clip: Dict[str, Any]) -> str:
     """Описание сцены для вижна + контекст главы (эпоха и место).
 
@@ -203,7 +169,7 @@ def _write_stock_report(project_dir: Path, ok_count: int, fallback_ids: List[int
 
 def _enabled_sources() -> List[str]:
     """Включённые источники в порядке из настроек. local — только если задана папка."""
-    raw = getattr(config, 'STOCK_SOURCES', ['local', 'pexels', 'pixabay', 'envato'])
+    raw = getattr(config, 'STOCK_SOURCES', ['local', 'pexels', 'pixabay'])
     if isinstance(raw, str):
         raw = [s.strip().lower() for s in raw.split(',') if s.strip()]
     out = []
@@ -214,26 +180,6 @@ def _enabled_sources() -> List[str]:
             continue                     # нет ни ключа, ни временного ключа сайта
         if s == 'pixabay' and not (getattr(config, 'PIXABAY_API_KEY', '') or '').strip():
             continue
-        if s == 'envato':
-            cookie_json = (getattr(config, 'ENVATO_COOKIE_JSON', '') or '').strip()
-            profile = (getattr(config, 'ENVATO_BROWSER_PROFILE', '') or '').strip()
-            default_profile = Path(__file__).resolve().parents[1] / '.envato_profile'
-            if not cookie_json and not profile and not default_profile.exists():
-                continue
-        if s == 'filesta_envato':
-            # Поиск работает и без настройки, но КУПИТЬ файл без снятого
-            # отпечатка невозможно — источник, который найдёт и не сможет
-            # скачать, только занимает места в листе вижна.
-            try:
-                from units.filesta_source import configured, fingerprint_path
-            except Exception as exc:                       # noqa: BLE001
-                logger.warning("[stock] filesta_envato недоступен (%s) — источник пропущен", exc)
-                continue
-            if not configured():
-                print(f"\n[stock] ⚠️  Filesta (Envato): отпечаток не снят "
-                      f"({fingerprint_path()}) — источник пропущен.")
-                print("[stock]    Settings → Filesta (Envato) → «Снять отпечаток».")
-                continue
         out.append(s)
     return out
 
@@ -289,7 +235,6 @@ def _search_cascade(
     used_urls: set,
     limit: int = 0,
     subject: str = '',
-    min_len: float = 0.0,
 ) -> List[StockResult]:
     """Назначенный источник, затем соседние — ТОТ ЖЕ запрос. Возвращает ранжированное.
 
@@ -299,9 +244,6 @@ def _search_cascade(
     оставалось 1-5 кандидатов; на живой проверке 26.08 сотня элементов давала вдвое
     -впятеро больше выживших («Man staring window» 1 → 5, «Soviet concert hall
     audience» 5 → 11). Провайдеры сами клампят: Pexels до 80, Pixabay до 200.
-
-    `min_len` — просьба к источнику отдать ролики не короче N секунд. Понимает
-    её пока только Envato (`LENGTH_FILTER_SOURCES`), остальным она не уходит.
     """
     if limit <= 0:
         limit = int(getattr(config, 'STOCK_SEARCH_LIMIT', 80) or 80)
@@ -315,8 +257,7 @@ def _search_cascade(
     # значит «нашлось лучшее».
     by_source: List[List[StockResult]] = []
     for src in order:
-        raw = search_source(src, query, media_type, limit, target_w, target_h,
-                            min_len=min_len)
+        raw = search_source(src, query, media_type, limit, target_w, target_h)
         ranked = rank_stock(raw, query, clip_duration=clip_duration,
                             target_w=target_w, target_h=target_h, used_urls=used_urls,
                             subject=subject)
@@ -406,14 +347,6 @@ class StockProcessor:
     def _load_plan(self) -> Dict[str, Any]:
         raw = json.loads(self.montage_path.read_text(encoding='utf-8-sig'))
         return raw.get('montage_plan', raw) if isinstance(raw, dict) else {}
-
-    def _save_plan(self, plan: Dict[str, Any]) -> None:
-        raw = json.loads(self.montage_path.read_text(encoding='utf-8-sig'))
-        if isinstance(raw, dict) and 'montage_plan' in raw:
-            raw['montage_plan'] = plan
-        else:
-            raw = plan
-        self.montage_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding='utf-8')
 
     def _commit_pending_delta(self, pending: List[Dict[str, Any]]) -> None:
         """Записать ТОЛЬКО свои клипы (по их итоговому source + материализованные поля)
@@ -666,15 +599,9 @@ class StockProcessor:
             subject = ''                  # повтор без нейрогенерации: лучше близкий кадр, чем пустой
 
         tolerance = float(getattr(config, 'STOCK_STRETCH_TOLERANCE_SEC', 2) or 0)
-        # Просим у источника ролики не короче «сцена минус прощаемое замедление»:
-        # тогда ЛЮБОЙ кандидат закрывает сцену сам — либо покрывает её, либо не
-        # добирает в пределах порога, и разницу вытянет склейка. Добор вторым
-        # куском остаётся, но становится запасным путём, а не штатным, и вторая
-        # платная загрузка не тратится (решение пользователя 01.09).
-        wanted_len = (duration - tolerance) if media_type == 'video' else 0.0
         n_vision = 0 if relaxed else int(getattr(config, 'STOCK_VISION_CANDIDATES', 0) or 0)
 
-        def _collect(media: str, min_len: float) -> List[StockResult]:
+        def _collect(media: str) -> List[StockResult]:
             """Лист кандидатов по ЛЕСТНИЦЕ запросов: богатый → бедный.
 
             Стоковый поиск цепляется за одно доминирующее существительное и
@@ -695,7 +622,7 @@ class StockProcessor:
                     step, media, primary=primary_source, sources=sources,
                     clip_duration=duration if media == 'video' else 0.0,
                     target_w=self.target_w, target_h=self.target_h,
-                    used_urls=self.used_urls, subject=subject, min_len=min_len,
+                    used_urls=self.used_urls, subject=subject,
                 )
                 fresh = [c for c in found if c.url not in seen]
                 seen.update(c.url for c in fresh)
@@ -709,7 +636,7 @@ class StockProcessor:
 
         from units.stock_queries import query_ladder
         ladder = query_ladder(sq)
-        ranked = _collect(media_type, wanted_len)
+        ranked = _collect(media_type)
         # Видео не нашлось НИ В ОДНОМ стоке → пробуем ФОТО тем же запросом, и
         # только потом переписываем сам запрос. Видеобиблиотеки держат широкие
         # темы, на узкий сюжет ролика может не быть вовсе, а снимок есть. Замер
@@ -720,7 +647,7 @@ class StockProcessor:
         if not ranked and media_type == 'video':
             logger.info("    клип %s: видео не нашлось ни в одном стоке по «%s» → пробую фото",
                         cid, query[:60])
-            ranked = _collect('photo', 0.0)
+            ranked = _collect('photo')
             if ranked:
                 media_type = 'photo'
                 logger.info("    клип %s: фото нашлось — беру снимок вместо футажа", cid)
@@ -781,8 +708,7 @@ class StockProcessor:
                             sources=sources,
                             clip_duration=duration if media_type == 'video' else 0.0,
                             target_w=self.target_w, target_h=self.target_h,
-                            used_urls=self.used_urls, subject=subject,
-                            min_len=wanted_len)
+                            used_urls=self.used_urls, subject=subject)
                     portion = [c for c in step_pool if c.url not in seen_urls][:n_vision]
                     if not portion:
                         logger.info("    клип %s: ступень %s «%s» — новых кандидатов "
@@ -806,33 +732,7 @@ class StockProcessor:
                 reason = getattr(self, '_vision_reason', '') or 'all_rejected'
                 if reason == 'interrupted':
                     return {'id': cid, 'status': 'interrupted', 'query': query}
-                # Ступень 1: тот же запрос БЕЗ фильтра длины. Забраковали ровно
-                # тех, кого фильтр оставил, — значит стоит посмотреть на короткие,
-                # которые он отсёк: сцену они закроют добором из двух кусков.
-                #
-                # ДЕДУП здесь обязателен: выдача без фильтра почти совпадает с
-                # выдачей под ним (замер 01.09: общих 63-69 из 65-70), поэтому
-                # без отсева уже показанных вижн получил бы тот же лист и так же
-                # его отверг — впустую и запрос, и вызов вижна. Новых нет —
-                # ступень пропускаем молча.
-                if (reason == 'all_rejected' and media_type == 'video'
-                        and wanted_len >= _MIN_LENGTH_FILTER_SEC
-                        and any(s in sources for s in LENGTH_FILTER_SOURCES)):
-                    relaxed = _collect('video', 0.0)
-                    fresh = [c for c in relaxed if c.url not in seen_urls]
-                    if fresh:
-                        logger.info("    клип %s: вижн забраковал всё под фильтром длины "
-                                    "→ смотрю %s коротких, что фильтр отсёк", cid, len(fresh))
-                        self._vision_reason = ''
-                        picked, more_rejected, vision_order = self._vision_pick(
-                            clip, fresh[:n_vision], 'video', stop_event=stop_event)
-                        rejected_urls |= more_rejected
-                        reason = getattr(self, '_vision_reason', '') or reason
-                        if reason == 'interrupted':
-                            return {'id': cid, 'status': 'interrupted', 'query': query}
-                        if picked is not None:
-                            ranked = fresh
-                # Ступень 2: вижн забраковал ВСЁ видео — это не приговор сцене:
+                # Вижн забраковал ВСЁ видео — это не приговор сцене:
                 # снимок на ту же тему часто есть там, где годного футажа нет.
                 # Раньше смена носителя срабатывала только при ПУСТОЙ выдаче, а
                 # «нашли, но всё отвергли» вело прямиком в нейрогенерацию
@@ -873,10 +773,9 @@ class StockProcessor:
             # Забракованного вижном в запас НЕ берём: он прямо назвал кадр
             # непригодным, и подставлять его после сбоя на победителе — значит
             # тихо вернуть в ролик то, что уже отвергли (каскад 2.7, ступень 1).
-            # У платного источника цена ошибки ещё и в загрузке из суточной квоты.
             if cand.url in rejected_urls:
                 logger.info("    клип %s: кандидат %s пропущен — забракован вижном",
-                            cid, (cand.asset_id or cand.url)[-40:])
+                            cid, cand.url[-40:])
                 continue
             # Повтор без нейрогенерации: то, что уже стоит в ролике, не дублируем.
             if cand.page_url and cand.page_url in getattr(self, 'taken_pages', ()):
@@ -915,12 +814,12 @@ class StockProcessor:
                 self._release_url(partner.url)
 
             logger.debug("    клип %s: беру кандидата %s «%s» (%s)", cid,
-                         cand.asset_id or cand.url[-30:], (cand.title or '')[:60],
+                         cand.url[-30:], (cand.title or '')[:60],
                          cand.source)
             res = self._materialize(clip, cand, duration, stop_event=stop_event)
             if not res.get('ok'):
                 logger.info("    клип %s: кандидат %s не закрыл сцену — беру следующего",
-                            cid, cand.asset_id or cand.url[-40:])
+                            cid, cand.url[-40:])
             if res.get('ok'):
                 self._add_credit(cid, cand)
                 return {'id': cid, 'status': 'ok', 'source': cand.source,
@@ -942,8 +841,7 @@ class StockProcessor:
 
         Нового поиска и нового вижн-вызова нет: берём следующего по порядку
         листа, кого вижн не забраковал. Предпочтения источникам тут нет
-        намеренно — порядок задан отбором, а не тем, платный сток или нет
-        (решение пользователя 01.09).
+        намеренно — порядок задан отбором (решение пользователя 01.09).
         """
         minimum = float(getattr(config, 'STOCK_MIN_PART_SEC', 1.5) or 1.5)
         for cand in ranked:
@@ -999,23 +897,6 @@ class StockProcessor:
                 self._vision_reason = 'interrupted'
                 return None, set(), []
             candidate_id = f'C{index}'
-            # Платный источник (Envato через Filesta): смотреть НЕЛЬЗЯ то, за что
-            # ещё не заплачено. В лист идёт бесплатное превью, а загрузка мастера
-            # тратит одну из 300 суточных и делается только для победителя.
-            if getattr(cand, 'preview_only', False):
-                got = self._fetch_preview(cand, work, candidate_id, stop_event=stop_event)
-                if got is None:
-                    logger.info("    клип %s: превью кандидата %s не скачалось", cid, candidate_id)
-                    continue
-                target, kind, duration = got
-                cand._preview_file = str(target)      # Ф4 переиспользует, не качая снова
-                fetched.append((Candidate(
-                    candidate_id=candidate_id, path=target, kind=kind,
-                    duration=duration, title=cand.title or '',
-                    meta={'url': cand.url, 'page_url': cand.page_url,
-                          'source': cand.source, 'preview': True},
-                ), cand))
-                continue
             if cand.media_type == 'video':
                 target = work / f'{candidate_id}.mp4'
             else:
@@ -1029,9 +910,6 @@ class StockProcessor:
                 if cand.source == 'local' and cand.local_path:
                     shutil.copy2(cand.local_path, target)
                     ok = True
-                elif cand.source == 'envato':
-                    from units.envato_source import download_envato_asset
-                    ok = bool(download_envato_asset(cand.url, target))
                 else:
                     ok = _http_download(cand.url, target, stop_event=stop_event, timeout=120, max_mb=200)
             except Exception as exc:  # noqa: BLE001
@@ -1096,194 +974,11 @@ class StockProcessor:
         self._vision_reason = ''
         return ordered[0], rejected_urls, ordered
 
-    # ── превью платного источника (Envato/Filesta) ──────────────────────────
-    def _fetch_preview(self, cand: StockResult, work: Path, candidate_id: str,
-                       *, stop_event: Optional[threading.Event] = None):
-        """Скачать БЕСПЛАТНОЕ превью кандидата. (файл, вид, длительность) или None.
-
-        Два режима, выбор за пользователем галкой «раскадровка вижну»:
-
-          • постер (по умолчанию) — обложка карточки, десятки килобайт, доля
-            секунды. Вижн видит один кадр, поэтому в задании ему говорится, что
-            движение по такому кадру не судят (`single_frame`);
-          • раскадровка — превью-mp4 (960×540, медиана 2,9 МБ, 0,5–1,2 с). Даёт
-            три настоящих кадра И длительность ролика, которой в карточке нет.
-
-        Квоту загрузок ни то, ни другое не тратит: замеры 28.08 — 16 превью
-        подряд, ни капчи, ни лимита.
-        """
-        storyboard = bool(getattr(config, 'FILESTA_ENVATO_STORYBOARD', False))
-        preview_max_mb = max(1, int(getattr(config, 'FILESTA_ENVATO_PREVIEW_MAX_MB', 25) or 25))
-        video_url = str(getattr(cand, 'preview_url', '') or '')
-        poster_url = str(getattr(cand, 'poster_url', '') or '')
-
-        # Порядок попыток: сначала выбранный режим, затем второй — лучше судить
-        # по обложке, чем выбросить кандидата совсем.
-        attempts = []
-        if storyboard and video_url:
-            attempts.append(('video', video_url))
-        if poster_url:
-            attempts.append(('photo', poster_url))
-        if not storyboard and video_url:
-            attempts.append(('video', video_url))
-
-        for kind, url in attempts:
-            target = work / (f'{candidate_id}_preview.mp4' if kind == 'video'
-                             else f'{candidate_id}_poster.jpg')
-            try:
-                ok = _http_download(url, target, stop_event=stop_event, timeout=90,
-                                    max_mb=preview_max_mb if kind == 'video' else 8)
-            except Exception as exc:                       # noqa: BLE001
-                logger.info("    превью не скачалось (%s): %s", kind, exc)
-                ok = False
-            if not ok or not target.exists() or target.stat().st_size <= 1024:
-                continue
-            duration = 0.0
-            if kind == 'video':
-                info = probe_video(target)
-                if info:
-                    duration = float(info.get('duration') or 0)
-                    # Длительность превью = длительность самого ролика; она нужна
-                    # ДО оплаты, чтобы не купить ролик короче сцены (её в карточке
-                    # выдачи нет вовсе).
-                    cand.duration = duration
-            return target, kind, duration
-        return None
-
-    def _buy_master(self, cand: StockResult, destination: Path, clip_duration: float,
-                    *, clip_id: int) -> bool:
-        """Оплаченная загрузка мастер-файла. ОДНА загрузка из суточной квоты.
-
-        Перед покупкой — две проверки, обе бесплатные:
-
-        1. ДЛИТЕЛЬНОСТЬ. В карточке выдачи её нет, поэтому фильтр `rank_stock`
-           по `duration >= clip + 0.3` для этого источника не срабатывает (при
-           нуле проверка пропускается) — сцена на 8 с могла получить 5-секундный
-           ролик, который склейка растянет. Меряем по превью-mp4: оно качается
-           за секунду и квоту не тратит.
-        2. ОСТАТОК КВОТЫ. Кончилась — покупать нечего, сцена уходит по каскаду.
-
-        Отказ на любой из них квоту НЕ тратит: списание происходит в момент
-        `POST /api/downloads`, то есть строго ниже.
-        """
-        from units import filesta_source as filesta_envato
-
-        down = filesta_envato.source_down()
-        if down:
-            logger.info("    клип %s: %s", clip_id, down)
-            return False
-
-        # Короче сцены — НЕ повод отказываться (решение 01.09): на Envato может
-        # не быть роликов под восьмисекундную сцену вовсе, и отсев выбрасывал бы
-        # весь источник. Нехватку закрывает либо замедление в склейке, либо
-        # второй кусок — решение принимается ВЫШЕ, в `process_clip`, до покупки.
-        # Здесь остаётся отсечь только совсем бесполезное.
-        if cand.media_type == 'video':
-            known = self._known_duration(cand, clip_id)
-            minimum = float(getattr(config, 'STOCK_MIN_PART_SEC', 1.5) or 1.5)
-            if known and known < minimum:
-                logger.info("    клип %s: ролик %.1fс короче минимального куска "
-                            "%.1fс — пропускаю ДО оплаты (квота цела)",
-                            clip_id, known, minimum)
-                return False
-
-        # Несколько аккаунтов: лицензии Filesta не складывают суточный лимит
-        # (вторая подписка продлевает СРОК), поэтому 300 в сутки берётся с
-        # каждого аккаунта отдельно. Кто покупает — решает `filesta_accounts`
-        # по выбранной раскладке; исчерпанный или отказавший уступает место
-        # следующему, и только когда кончились все, сцена уходит по каскаду.
-        ok, left = self._buy_via_accounts(cand, destination, clip_id)
-        if ok:
-            self._masters_bought = getattr(self, '_masters_bought', 0) + 1
-            logger.info("    клип %s: мастер куплен и скачан (%s), остаток квоты %s",
-                        clip_id, cand.asset_id or '—',
-                        left if left is not None else '?')
-        else:
-            # Отдельная строка: переход к следующему кандидату после НЕУДАЧНОЙ
-            # покупки должен быть виден, а не теряться тихой итерацией цикла.
-            logger.warning("    клип %s: покупка мастера не удалась (%s) — "
-                           "беру следующего кандидата", clip_id, cand.asset_id or cand.url[-40:])
-        return ok
-
-    def _buy_via_accounts(self, cand: StockResult, destination: Path,
-                          clip_id: int):
-        """Купить мастер, перебирая аккаунты. Возвращает (успех, остаток).
-
-        Аккаунт, у которого квота кончилась или который отказал, в этом прогоне
-        больше не берётся (`self._filesta_skip`) — иначе каждый следующий клип
-        снова упирался бы в того же.
-
-        Реестра нет или безбраузерный путь выключен — работаем как раньше,
-        одним аккаунтом через браузер.
-        """
-        from units import filesta_pool as filesta_accounts, filesta_source as filesta_envato
-
-        if not filesta_envato.headless_enabled():
-            left = filesta_envato.quota_left()
-            if left is not None and left <= 0:
-                logger.warning("[stock] %s: суточная квота загрузок исчерпана — "
-                               "клип %s уходит по каскаду",
-                               filesta_envato.SOURCE, clip_id)
-                return False, left
-            return bool(filesta_envato.download_master(cand.url, destination)), left
-
-        skip = getattr(self, '_filesta_skip', None)
-        if skip is None:
-            skip = set()
-            self._filesta_skip = skip
-        filesta_accounts.ensure_default()
-
-        while True:
-            account = filesta_accounts.pick(
-                quota_of=filesta_envato.account_quota_left, skip=skip)
-            if account is None:
-                logger.warning("[stock] %s: свободных аккаунтов нет (квота "
-                               "исчерпана у всех) — клип %s уходит по каскаду",
-                               filesta_envato.SOURCE, clip_id)
-                return False, 0
-            left = filesta_envato.account_quota_left(account)
-            ok = filesta_envato.download_master_headless(
-                cand.url, destination, account)
-            if ok:
-                logger.info("    клип %s: покупал аккаунт %s (%s)",
-                            clip_id, account.id, account.name)
-                return True, filesta_envato.account_quota_left(account)
-            # Не вышло — этот аккаунт в этом прогоне больше не пробуем и
-            # отдаём ход следующему.
-            client = filesta_envato.client_for(account)
-            logger.warning("    клип %s: аккаунт %s не смог (%s) — пробую "
-                           "следующий", clip_id, account.id,
-                           (client.last_error or 'без причины')[:120])
-            skip.add(account.id)
-
-    def _fetch_preview_for_probe(self, cand: StockResult, work: Path) -> float:
-        """Скачать превью-mp4 только ради длительности. Возвращает секунды."""
-        url = str(getattr(cand, 'preview_url', '') or '')
-        if not url:
-            return 0.0
-        target = work / f'probe_{cand.asset_id or "x"}.mp4'
-        max_mb = max(1, int(getattr(config, 'FILESTA_ENVATO_PREVIEW_MAX_MB', 25) or 25))
-        if not _http_download(url, target, timeout=90, max_mb=max_mb):
-            return 0.0
-        info = probe_video(target)
-        duration = float((info or {}).get('duration') or 0)
-        if duration:
-            cand.duration = duration
-        return duration
-
     def _known_duration(self, cand: StockResult, clip_id: int) -> float:
-        """Длительность кандидата. У платного её в карточке нет — меряем превью.
-
-        Проба бесплатна (превью квоту не тратит) и нужна ДО покупки: по ней
-        решается, хватит ли одного футажа на сцену.
-        """
+        """Длительность кандидата из карточки стока (0 — неизвестна)."""
         known = float(getattr(cand, 'duration', 0) or 0)
         if known > 0:
             return known
-        if getattr(cand, 'preview_only', False):
-            work = self.project_dir / 'stock' / 'vision' / f'{clip_id:03d}'
-            work.mkdir(parents=True, exist_ok=True)
-            return self._fetch_preview_for_probe(cand, work)
         return 0.0
 
     def _plan_two_parts(self, scene: float, first_len: float, second_len: float) -> tuple:
@@ -1364,81 +1059,6 @@ class StockProcessor:
         clip['stock_page'] = first.page_url
         return {'ok': True, 'parts': list(clip['parts']), 'second': second}
 
-    def _master_path(self, cand: StockResult) -> Path:
-        """Где живёт ОПЛАЧЕННЫЙ мастер. Папка постоянная, файл не удаляется.
-
-        Хранилище ОБЩЕЕ для всех проектов (решение пользователя 01.09), а не
-        проектное: за ролик списана суточная загрузка, и он одинаково годится
-        соседнему проекту на ту же тему. Имя — по коду ассета, поэтому тот же
-        ролик, выбранный где угодно ещё, находится на диске и второй загрузки
-        не стоит.
-        """
-        name = _master_name(cand)
-        ext = 'mp4' if cand.media_type == 'video' else 'jpg'
-        return _MASTERS_DIR / cand.source / f'{name}.{ext}'
-
-    @staticmethod
-    def _normalize_master(path: Path, clip_id: int) -> None:
-        """Ужать мастер до разумного битрейта — иначе хранилище съест диск.
-
-        Envato отдаёт файл автора почти без сжатия: замер 01.09 — 252 МБ на
-        13 секунд, 153 Мбит/с. Нам столько не нужно ни на одном шаге: фрагмент
-        режется под сцену, а финальная склейка идёт в 10 Мбит/с. Приводим к
-        `STOCK_MASTER_MAX_MBPS` (по умолчанию 40) — это вчетверо выше того, что
-        доживёт до готового ролика, то есть запас по качеству остаётся, а место
-        экономится в разы.
-
-        Не трогаем, если битрейт уже ниже порога или порог выключен нулём.
-        Любая осечка ffmpeg — оставляем оригинал: место дешевле потерянной
-        загрузки из суточной квоты.
-        """
-        try:
-            limit = float(getattr(config, 'STOCK_MASTER_MAX_MBPS', 40) or 0)
-        except (TypeError, ValueError):
-            limit = 40.0
-        if limit <= 0 or not path.is_file():
-            return
-        info = probe_video(path) or {}
-        duration = float(info.get('duration') or 0)
-        if duration <= 0:
-            return
-        size_mb = path.stat().st_size / 1024 / 1024
-        mbps = size_mb * 8 / duration
-        if mbps <= limit * 1.1:            # уже нормальный — не трогаем
-            return
-        target = path.with_name(path.stem + '.norm.mp4')
-        command = [
-            'ffmpeg', '-y', '-v', 'error', '-i', str(path),
-            '-c:v', 'libx264', '-preset', 'veryfast',
-            '-b:v', f'{int(limit)}M', '-maxrate', f'{int(limit * 1.2)}M',
-            '-bufsize', f'{int(limit * 2)}M', '-pix_fmt', 'yuv420p',
-            '-an',                          # звук стоку не нужен
-            str(target),
-        ]
-        try:
-            result = subprocess.run(command, capture_output=True, timeout=900)
-            if result.returncode != 0 or not target.is_file() or target.stat().st_size < 1024:
-                target.unlink(missing_ok=True)
-                logger.info("    клип %s: мастер не ужался — оставляю как есть", clip_id)
-                return
-            new_mb = target.stat().st_size / 1024 / 1024
-            path.unlink(missing_ok=True)
-            target.rename(path)
-            logger.info("    клип %s: мастер ужат %.0f→%.0f МБ (%.0f→%.0f Мбит/с)",
-                        clip_id, size_mb, new_mb, mbps, new_mb * 8 / duration)
-        except Exception as exc:                            # noqa: BLE001
-            target.unlink(missing_ok=True)
-            logger.info("    клип %s: мастер не ужался (%s) — оставляю как есть",
-                        clip_id, type(exc).__name__)
-
-    @staticmethod
-    def _master_ready(path: Path) -> bool:
-        """Мастер на диске и не огрызок (обрыв качания оставляет крохи)."""
-        try:
-            return path.is_file() and path.stat().st_size > 1024
-        except OSError:
-            return False
-
     def _obtain_source(self, cand: StockResult, src: Path, clip_duration: float,
                        *, clip_id: int, stop_event: Optional[threading.Event] = None) -> bool:
         """Положить ИСХОДНИК кандидата в `src`: покупка, скачивание или свой файл.
@@ -1449,38 +1069,11 @@ class StockProcessor:
         if cand.source == 'local':
             return True                       # свой файл уже лежит на диске
         prefetched = getattr(cand, '_prefetched', None)
-        if getattr(cand, 'preview_only', False):
-            # ПРЕДОХРАНИТЕЛЬ: у платного источника `_prefetched` — это превью
-            # с водяным знаком, а не файл. Скопировать его в кадр значит
-            # выпустить ролик с меткой поперёк экрана. Здесь только покупка.
-            #
-            # Оплаченный мастер живёт в ПОСТОЯННОЙ папке проекта и не удаляется
-            # никогда: за него списана загрузка из суточной квоты. Раньше он
-            # качался во временный кэш и стирался сразу после нарезки — любая
-            # пересборка платила за тот же ролик заново, а сбой нарезки терял
-            # его совсем (улов живого прогона 01.09).
-            master = self._master_path(cand)
-            if not self._master_ready(master):
-                if not self._buy_master(cand, master, clip_duration, clip_id=clip_id):
-                    return False
-                # Ужимаем СРАЗУ после покупки: хранилище общее и живёт долго,
-                # а фрагменту сцены запаса в 40 Мбит/с хватает с большим верхом.
-                if cand.media_type == 'video':
-                    self._normalize_master(master, clip_id)
-            else:
-                logger.info("    клип %s: мастер %s уже оплачен раньше — "
-                            "беру с диска, квота цела", clip_id, cand.asset_id or master.name)
-            src.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(master, src)
-            return True
         if prefetched and Path(prefetched).exists():
             # Победитель вижн-отбора уже скачан — без повторной закачки.
             src.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(prefetched, src)
             return True
-        if cand.source == 'envato':
-            from units.envato_source import download_envato_asset
-            return bool(download_envato_asset(cand.url, src))
         return bool(_http_download(cand.url, src, stop_event=stop_event))
 
     def _materialize(self, clip: Dict[str, Any], cand: StockResult, duration: float,
@@ -1504,19 +1097,11 @@ class StockProcessor:
                 # Причину обрезки НЕЛЬЗЯ терять: `cut_footage` её называет
                 # («not a valid video», текст ffmpeg, таймаут), а раньше здесь
                 # стоял голый `return` — и в логе оставалось только «файл не
-                # скачался/не обрезался». У платного источника это особенно
-                # дорого: квота за мастер уже списана, а разбираться не по чему
-                # (улов живого прогона 01.09, клип 5, ассет F5LB763).
+                # скачался/не обрезался».
                 logger.warning("    клип %s: обрезка не удалась (%s): %s",
-                               cid, cand.asset_id or cand.source,
+                               cid, cand.source,
                                cut.get('error') or 'без причины')
-                if getattr(cand, 'preview_only', False):
-                    # Оплаченный исходник оставляем на диске: он стоил загрузки
-                    # из суточной квоты, и выбрасывать его вместе с ошибкой —
-                    # значит платить второй раз за тот же материал.
-                    logger.warning("    клип %s: оплаченный исходник сохранён — %s",
-                                   cid, src)
-                elif cand.source != 'local':
+                if cand.source != 'local':
                     src.unlink(missing_ok=True)
                 return {'ok': False}
             if cand.source != 'local':
@@ -1539,22 +1124,13 @@ class StockProcessor:
             ext = 'jpg' if ext == 'jpeg' else ext
         dst = self.generated_dir / f'{cid:03d}.{ext}'
         prefetched = getattr(cand, '_prefetched', None)
-        if getattr(cand, 'preview_only', False):
-            # То же правило, что и у видео: превью помечено, в кадр идёт только
-            # оплаченный мастер.
-            if not self._buy_master(cand, dst, 0.0, clip_id=cid):
-                return {'ok': False}
-        elif cand.source == 'local':
+        if cand.source == 'local':
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(cand.local_path, dst)
         elif prefetched and Path(prefetched).exists():
             # Победитель вижн-отбора уже скачан — без повторной закачки.
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(prefetched, dst)
-        elif cand.source == 'envato':
-            from units.envato_source import download_envato_asset
-            if not download_envato_asset(cand.url, dst):
-                return {'ok': False}
         elif not _http_download(cand.url, dst, stop_event=stop_event):
             return {'ok': False}
         clip['source'] = 'stock_photo'
@@ -1606,16 +1182,10 @@ class StockProcessor:
                         encoding='utf-8')
 
         # Человекочитаемая версия для описания YouTube. Дедуп по page_url.
-        # 'local' (свой материал) в атрибуцию не идёт — незачем. Туда же
-        # `filesta_envato`: подписка Envato Elements атрибуции не требует, а
-        # лицензию пользователь при необходимости скачивает в панели Filesta
-        # отдельной кнопкой (решение 8). В `stock_credits.json` строка остаётся —
-        # это техотчёт, а не публикуемый текст.
-        _NO_ATTRIBUTION = {'local', 'filesta_envato'}
+        # 'local' (свой материал) в атрибуцию не идёт — незачем.
+        _NO_ATTRIBUTION = {'local'}
         try:
-            _site = {'pexels': 'Pexels', 'pixabay': 'Pixabay', 'coverr': 'Coverr',
-                     'envato': 'Envato Elements',
-                     'filesta_envato': 'Envato Elements'}
+            _site = {'pexels': 'Pexels', 'pixabay': 'Pixabay'}
             lines, seen = [], set()
             for it in sorted(self.credits, key=lambda x: x.get('clip_id', 0)):
                 if it.get('source') in _NO_ATTRIBUTION:

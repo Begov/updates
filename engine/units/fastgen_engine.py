@@ -31,7 +31,7 @@ import threading
 import re
 import requests
 try:  # файл появляется под своим именем только целиком (см. units/media_io.py)
-    from units.media_io import atomic_open, atomic_target, write_bytes_atomic
+    from units.media_io import atomic_target, write_bytes_atomic
 except ImportError:                                               # pragma: no cover
     from media_io import atomic_target, write_bytes_atomic
 from pathlib import Path

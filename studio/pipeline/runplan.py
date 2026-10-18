@@ -82,7 +82,6 @@ def stage_env(v: dict) -> dict:
     if sources:
         m["STOCK_SOURCES"] = ",".join(sources)
     m["STOCK_VISION_PER_SOURCE"] = str(max(0, int(v.get("stock_vision_per_source", 2))))
-    m["FILESTA_ENVATO_STORYBOARD"] = "false"
     m["STOCK_LIBRARY_DIR"] = str(v.get("stock_library_dir") or "").strip()
     m["STOCK_RATIO_TARGET"] = f"{stock / 100:.3f}"
     m["STOCK_START_SEC"] = str(max(0, int(v.get("stock_gate_sec", 0))))

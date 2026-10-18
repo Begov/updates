@@ -85,15 +85,6 @@ class StockResult:
     low_quality: bool = False
     license_name: str = ''
     local_path: str = ''        # для source=local
-    # ── платные источники (filesta_envato) ──────────────────────────────────
-    # У бесплатных стоков `url` — это и есть конечный файл: скачал и вставил.
-    # У Envato за файлом стоит платная загрузка (300 в сутки), а до неё доступны
-    # только превью. Поля с безопасными дефолтами: остальные провайдеры их не
-    # заполняют, и ничего для них не меняется.
-    preview_url: str = ''       # публичный mp4-превью (у видео), с водяным знаком
-    poster_url: str = ''        # кадр-обложка карточки
-    preview_only: bool = False  # `url` — НЕ конечный файл: за ним платная загрузка
-    asset_id: str = ''          # код ассета Envato (7 символов)
 
 
 def _words(text: str) -> set:
@@ -996,49 +987,20 @@ def rank_stock(
     return [x[4] for x in scored]
 
 
-def search_envato(query: str, media_type: str = 'video', limit: int = 20,
-                  target_w: int = 1920, target_h: int = 1080) -> List[StockResult]:
-    from units.envato_source import search_envato as _search
-    return _search(query, media_type, limit, target_w, target_h)
-
-
-def search_filesta_envato(query: str, media_type: str = 'video', limit: int = 20,
-                          target_w: int = 1920, target_h: int = 1080,
-                          min_len: float = 0.0) -> List[StockResult]:
-    """Envato Elements: поиск по публичной выдаче, файл — платной загрузкой
-    через Filesta (см. units/filesta_source.py)."""
-    from units.filesta_source import search_filesta_envato as _search
-    return _search(query, media_type, limit, target_w, target_h, min_len)
-
-
 SEARCH_FUNCS = {
     'local': search_local,
     'pexels': search_pexels,
     'pixabay': search_pixabay,
-    # Старый браузерный Envato по личным кукам заморожен (28.08), но оставлен:
-    # он у кого-то настроен и служит запасным путём.
-    'envato': search_envato,
-    'filesta_envato': search_filesta_envato,
 }
 
 
-# Источники, умеющие ОТБИРАТЬ по длительности на своей стороне. Остальным
-# `min_len` не передаём вовсе: у них общая сигнатура из пяти аргументов, и
-# лишний параметр их сломает.
-LENGTH_FILTER_SOURCES = {'filesta_envato'}
-
-
 def search_source(source: str, query: str, media_type: str = 'video',
-                  limit: int = 20, target_w: int = 1920, target_h: int = 1080,
-                  min_len: float = 0.0) -> List[StockResult]:
+                  limit: int = 20, target_w: int = 1920, target_h: int = 1080) -> List[StockResult]:
     fn = SEARCH_FUNCS.get(source)
     if not fn:
         return []
-    extra = {}
-    if min_len and media_type == 'video' and source in LENGTH_FILTER_SOURCES:
-        extra['min_len'] = float(min_len)
     try:
-        return fn(query, media_type, limit, target_w, target_h, **extra)
+        return fn(query, media_type, limit, target_w, target_h)
     except Exception as exc:
         logger.warning("%s: поиск упал: %s: %s", source, type(exc).__name__, exc)
         return []

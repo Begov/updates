@@ -358,7 +358,7 @@ def _ask_vision(provider: str, model: str, task: str, sheet: Path,
 #
 # Правило нужно ТОЛЬКО архивной ветке: помеченный мусор приходит из EPF и Serper
 # (веб-выдача). В стоковый лист ему попасть неоткуда — там лишь `local`,
-# `pexels`, `pixabay` и `filesta_envato`, см. `stock_search.SEARCH_FUNCS`.
+# `pexels` и `pixabay`, см. `stock_lookup.SEARCH_FUNCS`.
 _WATERMARK_RULE = (
     "DISQUALIFIER, check it FIRST and independently of how well the frame "
     "fits: a candidate whose image is covered by stock-agency watermarks — "
@@ -374,16 +374,6 @@ _WATERMARK_RULE = (
     "name, a photographer credit or a catalogue number along an edge, and "
     "such a frame is perfectly usable. The test is WHERE the mark sits — "
     "over the picture (unusable) or along its edge (fine).\n\n"
-)
-
-# Стоковая стадия. Envato показывает СВОИ превью с меткой, а оплаченный файл
-# приходит чистым — бракуя такой кадр, мы отвергали бы весь источник ещё до
-# покупки. У Pexels, Pixabay и своей папки меток нет вовсе.
-_STOCK_PREVIEW_NOTE = (
-    "These candidates are agency previews. A watermark over a preview frame is "
-    "EXPECTED and is NOT a defect: the licensed file this pipeline downloads "
-    "afterwards comes clean. Never reject a candidate for such a mark — judge "
-    "the content only: subject, place, composition.\n\n"
 )
 
 # Постерный режим: видео-кандидат показан ОДНИМ кадром (обложкой карточки).
@@ -594,10 +584,8 @@ def build_task(contract_json: str, *, stage: str = "", single_frame: bool = Fals
         parts.append(_WATERMARK_RULE)
         if house_block:
             parts.append(house_block)
-    else:
-        if house_block:
-            parts.append(house_block)
-        parts.append(_STOCK_PREVIEW_NOTE)
+    elif house_block:
+        parts.append(house_block)
     if single_frame:
         parts.append(_SINGLE_FRAME_NOTE)
     parts.append(_COMMON_RULES)

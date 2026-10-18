@@ -398,8 +398,7 @@ CLAUDE_API_REFERER = os.getenv(
 # STOCK (Pexels / Pixabay / Local Stock Library) — сток-футаж и фото
 # ============================================================================
 STOCK_ENABLED = os.getenv('STOCK_ENABLED', 'false').lower() in ('true', '1', 'yes', 'on')
-# Источники через запятую: local | pexels | pixabay | filesta_envato
-# (`envato` — старый браузерный провайдер, заморожен 28.08)
+# Источники через запятую: local | pexels | pixabay
 STOCK_SOURCES = [s.strip().lower() for s in os.getenv('STOCK_SOURCES', 'local,pexels,pixabay').split(',') if s.strip()]
 # Доля ВСЕХ клипов под сток; внутри неё — доля видео (остальное фото)
 STOCK_RATIO_TARGET = float(os.getenv('STOCK_RATIO_TARGET', '0.30') or '0.30')
@@ -530,60 +529,7 @@ YOUTUBE_CLIP_PARALLEL = int(os.getenv('YOUTUBE_CLIP_PARALLEL', '4') or '4')
 YOUTUBE_RATIO_TARGET = float(os.getenv('YOUTUBE_RATIO_TARGET', '0.0') or '0.0')
 YOUTUBE_RATIO_MAX = float(os.getenv('YOUTUBE_RATIO_MAX', '1.0') or '1.0')
 
-# Envato uses the normal browser UI with a local Playwright profile. Cookie JSON
-# can be a Playwright storage-state file or a browser-extension export.
-# ЗАМОРОЖЕН 28.08: галки в GUI нет, в STOCK_SOURCES источник не попадает. Код
-# оставлен — он у кого-то настроен и служит запасным путём.
-ENVATO_COOKIE_JSON = os.getenv('ENVATO_COOKIE_JSON', '').strip()
-ENVATO_BROWSER_PROFILE = os.getenv('ENVATO_BROWSER_PROFILE', '').strip()
-ENVATO_BROWSER_EXECUTABLE = os.getenv('ENVATO_BROWSER_EXECUTABLE', '').strip()
-ENVATO_HEADLESS = os.getenv('ENVATO_HEADLESS', 'true').lower() in ('true', '1', 'yes', 'on')
-ENVATO_PROJECT_NAME = os.getenv('ENVATO_PROJECT_NAME', 'BegoFrame').strip() or 'BegoFrame'
 
-# ============================================================================
-# ENVATO ELEMENTS ЧЕРЕЗ ПАНЕЛЬ FILESTA (источник стока `filesta_envato`)
-# ============================================================================
-# Поиск идёт по ПУБЛИЧНОЙ выдаче Envato (логин не нужен), отбор — по бесплатным
-# превью, а мастер-файл качается через Filesta, где куплена лицензия
-# (300 загрузок в сутки). Защиту Filesta проходит только настоящий Chrome,
-# поэтому загрузка идёт по CDP к браузеру с отдельным профилем.
-#
-# Всё своё лежит рядом с агентом: agent/.filesta/ — отпечаток устройства
-# (fp_real.json) и профиль Chrome. Пустые значения ниже означают именно её.
-FILESTA_HOME = os.getenv('FILESTA_HOME', '').strip()
-FILESTA_PROFILE = os.getenv('FILESTA_PROFILE', '').strip()
-FILESTA_FINGERPRINT = os.getenv('FILESTA_FINGERPRINT', '').strip()
-FILESTA_CDP_URL = (os.getenv('FILESTA_CDP_URL', '') or 'http://127.0.0.1:9222').strip()
-FILESTA_CHROME_EXE = os.getenv('FILESTA_CHROME_EXE', '').strip()
-# Несколько аккаунтов Filesta. Лицензии НЕ складывают суточный лимит: вторая
-# подписка продлевает срок, а не даёт +300 в день (замер 02.09.2026). Поэтому
-# 300 в сутки берётся с КАЖДОГО аккаунта, а их число не ограничено.
-FILESTA_ACCOUNTS_FILE = os.getenv('FILESTA_ACCOUNTS_FILE', '').strip()
-# Как раскладывать покупки: sequential — вычерпать первый до нуля, потом
-# второй; spread — раскидывать поровну между всеми.
-FILESTA_ROTATION = (os.getenv('FILESTA_ROTATION', '') or 'sequential').strip().lower()
-if FILESTA_ROTATION not in ('sequential', 'spread'):
-    FILESTA_ROTATION = 'sequential'
-# Качать без браузера: подписанную ссылку запрашивает Python, а не страница в
-# Chrome. Браузер остаётся нужен только для входа и снятия отпечатка.
-FILESTA_HEADLESS = (os.getenv('FILESTA_HEADLESS', '') or 'on').strip().lower()
-# Потолок мастер-файла. Envato отдаёт файл АВТОРА: замеры 28.08 — 12-секундный
-# 1080p весил 86 МБ, а 4K-ассет 4,3 ГБ. Отказ по размеру квоту НЕ возвращает
-# (она списывается в момент запроса), поэтому такой случай пишется в лог
-# отдельной строкой; основная защита — фильтр 720p+1080p в адресе поиска.
-FILESTA_MAX_MASTER_MB = max(1, int(os.getenv('FILESTA_MAX_MASTER_MB', '300') or 300))
-
-# Сколько ждать, пока человек нажмёт капчу в открытой панели (0 — не ждать).
-FILESTA_CAPTCHA_WAIT_SEC = int(os.getenv('FILESTA_CAPTCHA_WAIT_SEC', '300') or '300')
-# Сторонний решатель капчи — НЕобязательная ступень. Пусто = ступени нет,
-# агент обходится своим рендером, кликом мышью и ожиданием человека.
-CAPTCHA_SOLVER_PROVIDER = (os.getenv('CAPTCHA_SOLVER_PROVIDER', 'capmonster') or 'capmonster').strip().lower()
-CAPTCHA_SOLVER_KEY = os.getenv('CAPTCHA_SOLVER_KEY', '').strip()# Что показывать вижну: обложку карточки (по умолчанию) или превью-mp4, из
-# которого он увидит три кадра, а стадия узнает длительность ролика.
-FILESTA_ENVATO_STORYBOARD = os.getenv(
-    'FILESTA_ENVATO_STORYBOARD', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
-FILESTA_ENVATO_PREVIEW_MAX_MB = max(
-    1, int(os.getenv('FILESTA_ENVATO_PREVIEW_MAX_MB', '25') or 25))
 # Сколько кандидатов берём от КАЖДОГО включённого стока, прежде чем добирать
 # остальными. Обычный режим — три стока сразу, и без квоты лист перекашивал тот,
 # кто вернул больше: дальше идёт срез STOCK_VISION_CANDIDATES. 0 = как раньше.
@@ -592,9 +538,8 @@ STOCK_VISION_PER_SOURCE = max(0, int(os.getenv('STOCK_VISION_PER_SOURCE', '2') o
 # ============================================================================
 # ФУТАЖ КОРОЧЕ СЦЕНЫ: замедлить или добрать вторым куском
 # ============================================================================
-# Сцена длиннее найденного футажа — обычное дело: на Envato восьмисекундных
-# роликов под восьмисекундную сцену может не быть вовсе, и выбрасывать за это
-# хорошие кадры нельзя.
+# Сцена длиннее найденного футажа — обычное дело: восьмисекундных роликов под
+# восьмисекундную сцену может не быть вовсе, и выбрасывать за это хорошие кадры нельзя.
 #
 # До этого порога разницу тянет склейка: `video_concat.process_video` считает
 # `speed_factor = длина / сцена` и растягивает фрагмент через `setpts`. Проверено
@@ -607,11 +552,6 @@ STOCK_STRETCH_TOLERANCE_SEC = max(0.0, float(
     os.getenv('STOCK_STRETCH_TOLERANCE_SEC', '2') or 2))
 # Короче этого куска футаж бесполезен: из него не выйдет ни одной части сцены.
 STOCK_MIN_PART_SEC = max(0.5, float(os.getenv('STOCK_MIN_PART_SEC', '1.5') or 1.5))
-
-# Оплаченные мастера хранятся долго и общей папкой, а Envato отдаёт их почти
-# без сжатия (замер 01.09: 252 МБ на 13 с, 153 Мбит/с). Ужимаем до этого
-# битрейта — вчетверо выше того, что доживает до готового ролика. 0 — не трогать.
-STOCK_MASTER_MAX_MBPS = float(os.getenv('STOCK_MASTER_MAX_MBPS', '40') or '40')
 
 # Прокси для ВСЕГО Codex/ChatGPT (одна подписка = один IP): режиссёр + промптеры + адаптеры
 # + запрос квоты. Пусто = напрямую. Задаётся юзером в GUI (Settings). http:// или socks5://.
