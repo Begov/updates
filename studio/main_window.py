@@ -4,20 +4,22 @@ from __future__ import annotations
 import subprocess
 import threading
 
-from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractAnimation, QEvent, QObject, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QScrollArea, QStackedWidget, QSystemTrayIcon,
     QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    FluentIcon, FluentWindow, InfoBar, InfoBarPosition, NavigationAvatarWidget, NavigationItemPosition,
+    FluentIcon, FluentWindow, InfoBar, InfoBarPosition, NavigationAvatarWidget, NavigationDisplayMode,
+    NavigationItemPosition,
 )
 
 from . import APP_NAME, APP_VERSION, engine_link, i18n, paths, state, theme
 from .i18n import T, tr
 from .services import monitors as mon
 from .services import procs
+from .ui import smooth
 from .ui.widgets import Chip, set_tip
 
 NAV_GAP = 10   # px между боковой панелью и областью контента
@@ -105,6 +107,44 @@ class PageHost(QWidget):
         self._scroll.setWidget(page)
 
 
+class _NavWidth(QObject):
+    """Область страниц меняет ширину один раз за раскрытие/сворачивание панели, а не на каждом кадре.
+
+    Штатно (NavigationInterface.eventFilter) страницы сужаются вслед за панелью на каждом кадре
+    анимации, и «Конвейер» с переносами строк перестраивается по ~45 мс за кадр — панель едет
+    рывками. Здесь место под панель освобождается сразу при раскрытии и занимается обратно
+    после сворачивания, а сама панель движется плавно.
+    """
+
+    def __init__(self, nav):
+        super().__init__(nav)
+        self.nav = nav
+        self.panel = nav.panel
+        self.panel.removeEventFilter(nav)
+        self.panel.installEventFilter(self)
+        self.panel.expandAni.finished.connect(self.settle)
+
+    def _docked(self) -> bool:
+        return self.panel.displayMode != NavigationDisplayMode.MENU     # в режиме меню панель поверх страниц
+
+    def _set(self, width: int) -> None:
+        if width != self.nav.width():
+            self.nav.setFixedWidth(width)
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt API)
+        if obj is self.panel and event.type() == QEvent.Type.Resize and self._docked():
+            ani = self.panel.expandAni
+            if ani.state() != QAbstractAnimation.Running:
+                self._set(self.panel.width())
+            elif ani.property("expand"):
+                self._set(max(self.nav.width(), ani.endValue().width()))
+        return False
+
+    def settle(self) -> None:
+        if self._docked():
+            self._set(self.panel.width())
+
+
 class MainWindow(FluentWindow):
     toast_requested = Signal(str)
 
@@ -133,6 +173,7 @@ class MainWindow(FluentWindow):
         self.setCustomBackgroundColor(QColor(theme.c("bg")), QColor(theme.c("bg")))
         self.navigationInterface.setExpandWidth(250)
         self.navigationInterface.setMinimumExpandWidth(NAV_EXPAND_WIDTH)
+        self._nav_width = _NavWidth(self.navigationInterface)
         try:
             self.navigationInterface.setReturnButtonVisible(False)
         except Exception:  # noqa: BLE001
@@ -367,11 +408,29 @@ class MainWindow(FluentWindow):
         self.switchTo(self.hosts[key])
 
     def switchTo(self, interface) -> None:  # noqa: N802 (переопределение метода FluentWindow)
-        """Мгновенное переключение страниц: анимация выезда Fluent на тяжёлых страницах рывками."""
+        """Смена страниц с плавным переходом из снимков (ui/smooth.PageFade).
+
+        Штатный выезд Fluent двигает саму страницу — на тяжёлых страницах это рывки."""
         key = interface.objectName().removeprefix("host_")
         if key in self.hosts:
             self.page(key)                                   # страница может быть ещё не создана
-        QStackedWidget.setCurrentWidget(self.stackedWidget.view, interface)
+        view = self.stackedWidget.view
+        current = view.currentWidget()
+        fade = getattr(self, "_page_fade", None)
+        if fade is not None:
+            try:
+                fade.finish()                                # прошлый переход ещё идёт — снимок без него
+            except RuntimeError:
+                pass
+            self._page_fade = None
+        old = smooth.snapshot(current) if self.isVisible() and current is not None \
+            and current is not interface and not self._rebuilding else None
+        QStackedWidget.setCurrentWidget(view, interface)
+        if old is not None:
+            # раскладка показанной страницы (переносы строк) — до снимка, а не в первых кадрах перехода
+            for _ in range(3):
+                QApplication.sendPostedEvents(None, QEvent.LayoutRequest)
+            self._page_fade = smooth.PageFade(interface, old)
         meta = next((p for p in PAGES if p[0] == key), None)
         if meta:
             self._top_title.setText(tr(meta[2]))

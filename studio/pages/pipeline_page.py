@@ -27,6 +27,7 @@ from ..pipeline.sections import sections
 from ..services import presets as preset_store
 from ..services import procs
 from ..ui.form import FormBuilder, Store
+from ..ui import smooth
 from ..ui.widgets import Card, Chip, Column, FlowBox, LogView, Segmented, button, label, repolish, set_tip
 from . import pipeline_parts as parts
 
@@ -218,8 +219,7 @@ class PipelinePage(QWidget):
 
     def _jump(self, scroll: SmoothScrollArea, card: Card) -> None:
         card.set_collapsed(False)
-        scroll.ensureWidgetVisible(card, 0, 0)
-        QTimer.singleShot(0, lambda: scroll.verticalScrollBar().setValue(card.y()))
+        QTimer.singleShot(0, lambda: smooth.scroll_to(scroll.verticalScrollBar(), card.y()))
 
     def _build_queue_card(self) -> QWidget:
         card = Card(T("Очередь файлов", "File queue"), "☰", key="pipe_queue", collapsible=False,

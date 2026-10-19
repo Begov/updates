@@ -331,18 +331,18 @@ class FlowBox(QWidget):
 
 
 class _SegmentButton(PushButton):
-    """РљРЅРѕРїРєР° РїРµСЂРµРєР»СЋС‡Р°С‚РµР»СЏ: РѕС‚РґРµР»СЊРЅР°СЏ, СЃРѕ СЃРІРѕРµР№ СЂР°РјРєРѕР№ вЂ” РєР°Рє РѕР±С‹С‡РЅС‹Рµ РєРЅРѕРїРєРё РїСЂРѕРіСЂР°РјРјС‹."""
+    """Кнопка переключателя: отдельная, со своей рамкой — как обычные кнопки программы."""
 
     def __init__(self, text: str = "", parent=None):
-        # РєРѕРЅСЃС‚СЂСѓРєС‚РѕСЂ PushButton Р±РёР±Р»РёРѕС‚РµРєРё РїРµСЂРµРіСЂСѓР¶РµРЅ Рё СЃР°Рј РІС‹Р·С‹РІР°РµС‚ __init__(parent=вЂ¦),
-        # РїРѕСЌС‚РѕРјСѓ С‚РµРєСЃС‚ вЂ” РѕС‚РґРµР»СЊРЅРѕ, РЅРµ С‡РµСЂРµР· super().__init__(text, parent)
+        # конструктор PushButton библиотеки перегружен и сам вызывает __init__(parent=…),
+        # поэтому текст — отдельно, не через super().__init__(text, parent)
         super().__init__(parent)
         self.setText(text)
         self.isSelected = False
         setFont(self, 14)
         self.setFixedSize(self.fontMetrics().horizontalAdvance(text) + 32, theme.CONTROL_HEIGHT)
 
-    def setSelected(self, selected: bool) -> None:  # noqa: N802 (РєР°Рє Сѓ РєРЅРѕРїРѕРє Р±РёР±Р»РёРѕС‚РµРєРё)
+    def setSelected(self, selected: bool) -> None:  # noqa: N802 (как у кнопок библиотеки)
         if self.isSelected != selected:
             self.isSelected = selected
             self.update()

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import paths, state
+from .ui import smooth
 
 PALETTES = {
     "dark": {
@@ -336,8 +337,14 @@ def _flat_style(p: dict) -> str:
     return "\n".join(rules)
 
 
+_POLISH, _WHEEL = QEvent.Type.Polish, QEvent.Type.Wheel   # фильтр видит каждое событие — без лишних поисков
+
+
 class _HeightGuard(QObject):
-    """Выравнивает высоту всех контролов: у Fluent и нативных виджетов она по умолчанию разная."""
+    """Выравнивает высоту всех контролов: у Fluent и нативных виджетов она по умолчанию разная.
+
+    Этот же общий фильтр отдаёт колесо мыши плавной прокрутке (ui/smooth.py): второй
+    фильтр на всё приложение стоил бы лишнего вызова Python на каждое событие."""
 
     def __init__(self):
         super().__init__()
@@ -349,7 +356,10 @@ class _HeightGuard(QObject):
         self._flat_types = (LineEdit, ComboBox, SpinBox, DoubleSpinBox)
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt API)
-        if event.type() == QEvent.Polish and isinstance(obj, QWidget) and not obj.property("keepHeight"):
+        kind = event.type()
+        if kind == _WHEEL:
+            return smooth.wheel(obj, event)
+        if kind == _POLISH and isinstance(obj, QWidget) and not obj.property("keepHeight"):
             parent = obj.parent()
             if isinstance(parent, (QAbstractSpinBox, QComboBox, self._switch)):
                 return False                                   # внутренние части составных виджетов
@@ -420,5 +430,6 @@ def apply(app: QApplication) -> None:
     if _guard is None:
         _flatten_fluent_borders()
         _tidy_fluent_scrollbars()
+        smooth.cache_svg_renderers()
         _guard = _HeightGuard()
         app.installEventFilter(_guard)

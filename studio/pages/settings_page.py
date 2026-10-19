@@ -21,6 +21,7 @@ from .. import catalog, engine_link, envfile, i18n, paths, theme
 from ..i18n import T, tr
 from ..services import monitors as mon
 from ..services import procs
+from ..ui import smooth
 from ..ui.widgets import LABEL_GAP, Card, Chip, FlowBox, button, label, set_tip
 
 # Описание поля: (ключ, подпись, подсказка, тип, опции)
@@ -650,8 +651,7 @@ class SettingsPage(QWidget):
     def _scroll_to(self, key: str) -> None:
         card = self.cards.get(key)
         if card:
-            self.scroll.ensureWidgetVisible(card, 0, 0)
-            self.scroll.verticalScrollBar().setValue(card.y())
+            smooth.scroll_to(self.scroll.verticalScrollBar(), card.y())
 
     # ============================================================ внешний вид
     def _apply_look(self, *_):
