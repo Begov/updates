@@ -38,7 +38,7 @@ STAGE_MAP = [
     ("STAGE 1", 1), ("transcrib", 1), ("транскрипц", 1), ("загрузка аудио", 1),
     ("STAGE 2", 2), ("direction", 2), ("director", 2), ("режиссерск", 2), ("монтажный план", 2),
     ("проход 1/2", 2), ("отправка запроса", 2),
-    ("STAGE 3:", 3), ("image gen", 3), ("fastgen", 3), ("imggen", 3),
+    ("STAGE 3:", 3), ("image gen", 3), ("imggen", 3),
     ("STAGE 3.5", 4), ("video gen", 4), ("veo_video", 4), ("img2video", 4), ("i2v", 4),
     ("STAGE 4", 5), ("concat", 5), ("assemble", 5),
 ]

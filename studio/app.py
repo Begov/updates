@@ -71,7 +71,7 @@ def main() -> int:
     queue = ConcatQueue()
     window = MainWindow(monitors, queue)
     app.setProperty('main_window', window)  # держим ссылку, пока окно живо
-    window.show()
+    window.showMaximized()                   # программа открывается на весь экран
     monitors.start()
 
     # Список моделей Codex обновляется у самого Codex в фоне; изменения подхватываются на лету.

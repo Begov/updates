@@ -172,6 +172,10 @@ class PromptsPage(QWidget):
         rl.addLayout(find)
         split.addWidget(right)
         split.setSizes([300, 900])
+        # при сужении окна сжимается редактор, а список промптов сохраняет ширину
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        left.setMinimumWidth(260)
         root.addWidget(split, 1)
 
         QShortcut(QKeySequence.Save, self, activated=self.save)

@@ -354,96 +354,27 @@ except ValueError:
     SUBTITLE_PHRASE_LEN = 50 if SUBTITLE_PHRASE_UNIT == 'chars' else 1
 
 
-# ============================================================================
-# НАСТРОЙКИ FASTGEN API (генерация изображений)
-# ============================================================================
-
-# API ключ FastGen (основной)
-FASTGEN_API_KEY = os.getenv('FASTGEN_API_KEY', '')
-
-# Резервный API ключ FastGen (используется когда основной исчерпал квоту/лицензию)
-# Если не задан — fallback на основной ключ (чтобы auto-switch не падал)
-FASTGEN_API_KEY_BACKUP = os.getenv('FASTGEN_API_KEY_BACKUP', '') or FASTGEN_API_KEY
-
-# Второй API ключ FastGen (dual-key: параллельная работа двумя аккаунтами)
-# Если FASTGEN_API_KEY_2 не задан — fallback на FASTGEN_API_KEY_BACKUP
-FASTGEN_API_KEY_2 = os.getenv('FASTGEN_API_KEY_2', '') or os.getenv('FASTGEN_API_KEY_BACKUP', '')
-FASTGEN_MAX_PARALLEL_2 = int(os.getenv('FASTGEN_MAX_PARALLEL_2',
-                                        os.getenv('FASTGEN_MAX_PARALLEL', '25')))
-
-# Дополнительные API ключи FastGen для multi-key ImageGen worker pool.
-FASTGEN_API_KEY_3 = os.getenv('FASTGEN_API_KEY_3', '')
-FASTGEN_API_KEY_4 = os.getenv('FASTGEN_API_KEY_4', '')
-FASTGEN_MAX_PARALLEL_3 = int(os.getenv('FASTGEN_MAX_PARALLEL_3',
-                                        os.getenv('FASTGEN_MAX_PARALLEL', '25')))
-FASTGEN_MAX_PARALLEL_4 = int(os.getenv('FASTGEN_MAX_PARALLEL_4',
-                                        os.getenv('FASTGEN_MAX_PARALLEL', '25')))
-
-# Базовые URL
-FASTGEN_API_BASE = 'https://api.fast-gen.ai/api'
-FASTGEN_STORAGE_URL = 'https://storage.fast-gen.ai'
-
-# Движок/модель генерации изображений:
-#   Flow API:  GEM_PIX_2 (Nano Pro, рекомендуется), GEM_PIX (Nano), IMAGEN_3_5, NARWHAL (Nano Banana 2), FLOWER (Nano Banana 2 via Flower)
-#   Grok:      GROK    (Grok, возвращает 4 варианта)
-#   Whisk:     WHISK   (Whisk, категоризированные рефы subject/scene/style)
-FASTGEN_MODEL = os.getenv('FASTGEN_MODEL', 'FLOWER')
-# Мёртвые движки (API V6: таких провайдеров нет → 404). Авто-миграция
-# старых .env на FLOWER (flower_image_generate, 1 credit — дефолт).
-if FASTGEN_MODEL in ('GEMINI', 'WHISK', 'IMAGEN_3_5'):
-    FASTGEN_MODEL = 'FLOWER'
-
-# Соотношение сторон: portrait, landscape, square
-FASTGEN_ASPECT_RATIO = os.getenv('FASTGEN_ASPECT_RATIO', 'landscape')
-
-# Максимум параллельных генераций
-FASTGEN_MAX_PARALLEL = int(os.getenv('FASTGEN_MAX_PARALLEL', '25'))
-
-# ImageGen на FastGen: когда часовая квота выжжена на ВСЕХ FastGen-ключах —
-# отдать весь остаток клипов VeoNonStop (Banana Pro) одним перемаппингом.
-# Если ни у одного ключа VeoNonStop не осталось квоты картинок — не жжём его
-# впустую, а ждём обновления часовой квоты FastGen (граница часа) и продолжаем
-# генерить FastGen'ом. off — старое поведение: этап просто останавливается.
-FASTGEN_QUOTA_FALLBACK_VEONONSTOP = (
-    os.getenv('FASTGEN_QUOTA_FALLBACK_VEONONSTOP', 'on') or 'on'
-).strip().lower() in ('on', 'true', '1', 'yes')
-
-# Интервал поллинга статуса (секунды)
-# If VeoNonStop ImageGen and FastGen hourly capacity are both unavailable,
-# use T2V for the remaining clips instead of waiting for FastGen.
+# Картинки VeoNonStop кончились (дневная квота на всех ключах, запасного ключа нет):
+# остаток клипов уходит в text-to-video вместо остановки этапа.
 VEONONSTOP_QUOTA_FALLBACK_T2V = (
     os.getenv('VEONONSTOP_QUOTA_FALLBACK_T2V', 'off') or 'off'
 ).strip().lower() in ('on', 'true', '1', 'yes')
 
-FASTGEN_POLL_INTERVAL = 8
-
-# Таймаут ожидания одной генерации (секунды)
-FASTGEN_POLL_TIMEOUT = 300
-
 # Предполётная проверка рефов: тест до начала генерации (True = включена)
-FASTGEN_PREFLIGHT_REFS = os.getenv('FASTGEN_PREFLIGHT_REFS', 'true').lower() in ('true', '1', 'yes')
-
-# Автоматический Grok-ремикс заблокированных рефов и цензурированных i2v кадров
-FASTGEN_GROK_REMIX = os.getenv('FASTGEN_GROK_REMIX', 'true').lower() in ('true', '1', 'yes')
+REF_PREFLIGHT = os.getenv('REF_PREFLIGHT', 'true').lower() in ('true', '1', 'yes')
 
 # ============================================================================
 # РЕМИКСЕР (перерисовка рефов и i2v кадров, отклонённых модерацией)
 # ============================================================================
 
-# Выбор ремиксера: FastGen (grok / flower / openai), CinAI (cinai — модель из CINAI_REMIX_MODEL) или off
-REMIX_ENGINE = os.getenv('REMIX_ENGINE', 'grok').lower()
-if REMIX_ENGINE in ('cinai_grok', 'cinai_gpt'):
-    REMIX_ENGINE = 'cinai'          # прежние движки CinAI на платных/квотных моделях
-if REMIX_ENGINE not in (
-    'grok', 'flower', 'openai', 'cinai', 'off'
-):
-    REMIX_ENGINE = 'grok'
+# Выбор ремиксера: CinAI (cinai — модель из CINAI_REMIX_MODEL) или off.
+# Прежние движки (grok / flower / openai, платные cinai_grok / cinai_gpt) переводятся на CinAI.
+REMIX_ENGINE = os.getenv('REMIX_ENGINE', 'cinai').lower()
+if REMIX_ENGINE != 'off':
+    REMIX_ENGINE = 'cinai'
 
-# Ремиксер выбран и для него есть доступ (ключ FastGen или сессия CinAI)
-REMIX_AVAILABLE = REMIX_ENGINE != 'off' and (
-    FASTGEN_GROK_REMIX or bool(FASTGEN_API_KEY)
-    or bool(os.getenv('CINAI_ACCESS_TOKEN', '').strip())
-)
+# Ремиксер выбран и для него есть доступ (сессия CinAI)
+REMIX_AVAILABLE = REMIX_ENGINE != 'off' and bool(os.getenv('CINAI_ACCESS_TOKEN', '').strip())
 
 # ============================================================================
 # НАСТРОЙКИ VEONONSTOP API (видеогенерация + картинки)
@@ -538,21 +469,12 @@ VEONONSTOP_CUSTOM_DURATION = os.getenv('VEONONSTOP_CUSTOM_DURATION', 'on')
 # Режим imggen: imagen, banana, banana_ref
 VEONONSTOP_IMGGEN_MODE = os.getenv('VEONONSTOP_IMGGEN_MODE', 'banana')
 
-# ImageGen fallback for OUR VeoNonStop API-key quota (429 «Daily image
-# generation limit exceeded»). This is separate from the provider-side
-# per-model cookie pool exhaustion (500 «ALL_COOKIES_EXHAUSTED_FOR_MODEL»),
-# which is handled by switching Banana models below.
-# off — старое поведение: докручивать циклы и останавливаться.
-VEONONSTOP_QUOTA_FALLBACK_FASTGEN = (
-    os.getenv('VEONONSTOP_QUOTA_FALLBACK_FASTGEN', 'on') or 'on'
-).strip().lower() in ('on', 'true', '1', 'yes')
-
 # Порядок перебора banana-моделей, когда сервис отвечает
 # «ALL_COOKIES_EXHAUSTED_FOR_MODEL: <модель>» (HTTP 500). Это отдельный пул
 # Google-аккаунтов (cookies) НА СТОРОНЕ СЕРВИСА под конкретную модель, а не наша
 # квота: у ключа image_remaining остаётся. Смена ключа не помогает (пул общий),
 # помогает смена модели — перебор идёт ПО КЛИПУ, а не по всему этапу.
-# Выжженные модели пропускаются; когда пусты все — остаток уходит на FastGen.
+# Выжженные модели пропускаются; когда пусты все — клипы остаются на повтор.
 VEONONSTOP_BANANA_MODEL_CHAIN = (
     os.getenv('VEONONSTOP_BANANA_MODEL_CHAIN', '') or 'GEM_PIX_2,NARWHAL,HARBOR_SEAL'
 ).strip()
@@ -734,8 +656,10 @@ PIPELINE_START_POINT  = os.getenv('PIPELINE_START_POINT', '') or 'audio'
 # Режим клипов: video | slideshow | vislide
 PIPELINE_CLIP_MODE         = os.getenv('PIPELINE_CLIP_MODE', '') or 'video'
 PIPELINE_VISLIDE_INTERVAL  = int(os.getenv('PIPELINE_VISLIDE_INTERVAL', '') or '3')
-# Источник изображений: fastgen | veononstop | cinai | skip
+# Источник изображений: veononstop | cinai | skip (FastGen убран — прежний выбор -> veononstop)
 PIPELINE_IMG_GEN      = os.getenv('PIPELINE_IMG_GEN', '') or 'veononstop'
+if PIPELINE_IMG_GEN.strip().lower() == 'fastgen':
+    PIPELINE_IMG_GEN = 'veononstop'
 # Режим видеогенерации: i2v | t2v | components | skip
 PIPELINE_VIDEO_MODE   = os.getenv('PIPELINE_VIDEO_MODE', '') or 'i2v'
 # I2V: replace per-clip motion prompts with one of the user-editable parallax
@@ -1007,17 +931,16 @@ INFOGRAPHIC_RATIO_MAX = max(
     INFOGRAPHIC_RATIO_TARGET,
     min(1.0, float(os.getenv('INFOGRAPHIC_RATIO_MAX', '0.25'))),
 )
-# Separate image route: fastgen | veononstop. This lets normal artwork and
-# information graphics use different models in one project.
-INFOGRAPHIC_IMG_PROVIDER = (os.getenv('INFOGRAPHIC_IMG_PROVIDER', 'fastgen') or 'fastgen').strip().lower()
-if INFOGRAPHIC_IMG_PROVIDER not in ('fastgen', 'veononstop', 'vertex', 'cheapvibe', 'varag', 'cinai'):
-    INFOGRAPHIC_IMG_PROVIDER = 'fastgen'
+# Separate image route (veononstop / vertex / cheapvibe / varag / cinai). This lets normal
+# artwork and information graphics use different models in one project.
+INFOGRAPHIC_IMG_PROVIDER = (os.getenv('INFOGRAPHIC_IMG_PROVIDER', 'veononstop') or 'veononstop').strip().lower()
+if INFOGRAPHIC_IMG_PROVIDER not in ('veononstop', 'vertex', 'cheapvibe', 'varag', 'cinai'):
+    INFOGRAPHIC_IMG_PROVIDER = 'veononstop'
 # Свои модели инфографики у Vertex и CheapVibeCode (ключи — общие, из «Настроек»)
 INFOGRAPHIC_VERTEX_MODEL = (os.getenv('INFOGRAPHIC_VERTEX_MODEL', '') or 'gemini-3.1-flash-lite-image').strip()
 INFOGRAPHIC_CHEAPVIBE_MODEL = (os.getenv('INFOGRAPHIC_CHEAPVIBE_MODEL', '') or 'gpt-image-2').strip()
 INFOGRAPHIC_CHEAPVIBE_SIZE = (os.getenv('INFOGRAPHIC_CHEAPVIBE_SIZE', '') or '1536x1024').strip()
 INFOGRAPHIC_CHEAPVIBE_QUALITY = (os.getenv('INFOGRAPHIC_CHEAPVIBE_QUALITY', '') or 'medium').strip().lower()
-INFOGRAPHIC_FASTGEN_MODEL = (os.getenv('INFOGRAPHIC_FASTGEN_MODEL', 'NARWHAL') or 'NARWHAL').strip()
 INFOGRAPHIC_CINAI_MODEL = _cinai_free(
     os.getenv('INFOGRAPHIC_CINAI_MODEL', CINAI_MODEL) or CINAI_MODEL, CINAI_FREE_IMAGE_MODELS)
 INFOGRAPHIC_CINAI_ASPECT_RATIO = (

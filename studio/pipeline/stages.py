@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import NamedTuple
 
-from .. import catalog, engine_link, paths
+from .. import catalog, engine_link, paths  # noqa: F401 — engine_link кладёт engine/ в sys.path
 from ..i18n import T, tr
 from .defaults import image_provider
 from units.source_ledger import VIDEO_SKIP_SOURCES, clip_media_ready    # engine в sys.path — см. engine_link
@@ -68,15 +68,6 @@ def video_mode_of(v: dict) -> str | None:
     if mode == "skip":
         return None
     return mode
-
-
-def fastgen_key(v: dict) -> tuple[str, bool]:
-    """(ключ FastGen, нужен ли режим «оба ключа») по выбору в «Конвейере»."""
-    cfg = engine_link.cfg
-    sel = v.get("fastgen_api_key") or "main"
-    key = {"backup": cfg("FASTGEN_API_KEY_2", "") or cfg("FASTGEN_API_KEY_BACKUP", ""),
-           "key3": cfg("FASTGEN_API_KEY_3", ""), "key4": cfg("FASTGEN_API_KEY_4", "")}.get(sel, "")
-    return (key or cfg("FASTGEN_API_KEY", "")), sel == "both"
 
 
 # ------------------------------------------------------- общие решения
@@ -146,11 +137,6 @@ def imagegen_job(v: dict, project: Path) -> tuple[dict, dict] | None:
     conf = {"REWRITE_MODEL": v["rewrite_model"]}
     if ig == "skip":                                    # только инфографика
         args = {"engine": "none", "project_dir": str(project)}
-    elif ig == "fastgen":
-        key, dual = fastgen_key(v)
-        args = {"engine": "fastgen", "project_dir": str(project), "api_key": key, "model": v["fastgen_model"],
-                "aspect": catalog.fastgen_ratio(v["veo_ratio"]), "parallel": int(v["fastgen_parallel"]),
-                "dual": dual, "skip_preflight": bool(v["skip_preflight"])}
     elif ig == "cinai":
         args = {"engine": "cinai", "project_dir": str(project), "model": v["cinai_model"], "aspect": v["veo_ratio"],
                 "quality": v["cinai_quality"], "parallel": int(v["cinai_parallel"])}

@@ -19,7 +19,7 @@ from qfluentwidgets import DoubleSpinBox, LineEdit, SpinBox
 
 from .. import theme
 from ..i18n import tr
-from .widgets import LABEL_GAP, Combo, PathPicker, Segmented, Toggle, set_tip, tip_html
+from .widgets import LABEL_GAP, Combo, FlowBox, PathPicker, Segmented, Toggle, set_tip, tip_html
 
 
 
@@ -80,12 +80,13 @@ class Custom:
 
 @dataclass
 class Group:
-    """Подраздел с заголовком и отступом."""
+    """Подраздел с заголовком и отступом. enabled — когда весь подраздел доступен."""
     title: Any
     items: list
     visible: Optional[Callable[[dict], bool]] = None
     tip: Any = None
     indent: int = 14
+    enabled: Optional[Callable[[dict], bool]] = None
 
 
 @dataclass
@@ -146,6 +147,7 @@ class FormBuilder(QObject):
         # «Формат кадра»): живут в хранилище одним значением, обновляются вместе.
         self.extra: list[_Bound] = []
         self._visible: list[tuple[QWidget, Callable]] = []
+        self._enabled: list[tuple[QWidget, Callable]] = []      # доступность подразделов (Group)
         self._notes: list[tuple[QLabel, Callable]] = []
         self._refreshing = False
         self.custom: dict[str, QWidget] = {}
@@ -174,15 +176,18 @@ class FormBuilder(QObject):
         self._refreshing = True
         try:
             values = self.store.values
+            # сначала подразделы: от их доступности зависит, как показывать поля внутри
+            for widget, rule in self._enabled:
+                widget.setEnabled(bool(rule(values)))
             for bound in list(self.bound.values()) + self.extra:
                 spec = bound.spec
                 if callable(spec.options):
                     self._apply_options(bound, spec.options(values))
-                self._show_value(bound)
                 if spec.enabled is not None:
                     bound.widget.setEnabled(bool(spec.enabled(values)))
                     if bound.label is not None:
                         bound.label.setEnabled(bool(spec.enabled(values)))
+                self._show_value(bound)
                 if spec.visible is not None:
                     bound.container.setVisible(bool(spec.visible(values)))
             for widget, rule in self._visible:
@@ -232,6 +237,8 @@ class FormBuilder(QObject):
             self.build(item.items, lay)
             if item.visible is not None:
                 self._visible.append((box, item.visible))
+            if item.enabled is not None:
+                self._enabled.append((box, item.enabled))
             return box
         if isinstance(item, QWidget):
             return item
@@ -277,20 +284,21 @@ class FormBuilder(QObject):
         return box
 
     def _make_row(self, row: Row) -> QWidget:
-        """Несколько полей в строке: у каждого своя подпись сверху, поля выровнены по нижнему краю."""
+        """Несколько полей в строке: у каждого своя подпись сверху, поля выровнены по нижнему краю.
+
+        Если в ширину не помещаются, поля переносятся на следующую строку — так форма
+        не распирает колонку и не прячет параметры за горизонтальной прокруткой.
+        """
         box = QWidget()
         outer = QVBoxLayout(box)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(LABEL_GAP)
         if row.label is not None:
             outer.addWidget(self._caption(row.label, row.tip, wrap=True))
-        lay = QHBoxLayout()
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(20)
-        outer.addLayout(lay)
+        flow = FlowBox(spacing=20, vspacing=12, align="bottom")
+        outer.addWidget(flow)
         for item in row.items:
             if item == "stretch":
-                lay.addStretch(1)
                 continue
             if isinstance(item, F):
                 part = QWidget()
@@ -304,19 +312,15 @@ class FormBuilder(QObject):
                 widget = self._make_widget(item)
                 pl.addLayout(self._control_line(item, widget))
                 self._bind(_Bound(item, widget, part, label))
-                grow = 1000 if item.kind in ("text", "file", "dir") else 0
-                if not grow:
-                    # Элемент не шире своего содержимого: иначе свободное место
-                    # делилось бы поровну между ними и параметры «разъезжались».
-                    part.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
-                lay.addWidget(part, grow, Qt.AlignBottom)
+                if item.kind in ("text", "file", "dir"):
+                    # путь и текст забирают свободное место строки
+                    part.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                    part.setMinimumWidth(220)
+                flow.add(part)
             else:
                 widget = self._make(item)
                 if widget is not None:
-                    lay.addWidget(widget, 0, Qt.AlignBottom)
-        # Хвостовая растяжка нужна всегда: если единственное растягиваемое поле
-        # скрыто (например, путь к логотипу), остальные прижимаются влево.
-        lay.addStretch(1)
+                    flow.add(widget)
         if row.visible is not None:
             self._visible.append((box, row.visible))
         return box
@@ -342,7 +346,7 @@ class FormBuilder(QObject):
             w.setSingleStep(int(spec.step or 1))
             w.setValue(int(value if value is not None else spec.lo))
             w.setKeyboardTracking(False)
-            w.setFixedWidth(spec.width or 116)
+            w.setFixedWidth(spec.width or 128)
             w.valueChanged.connect(lambda v, k=spec.key: self._user_set(k, int(v)))
         elif kind == "float":
             w = DoubleSpinBox()
@@ -351,7 +355,7 @@ class FormBuilder(QObject):
             w.setSingleStep(float(spec.step or 0.1))
             w.setValue(float(value if value is not None else spec.lo))
             w.setKeyboardTracking(False)
-            w.setFixedWidth(spec.width or 124)
+            w.setFixedWidth(spec.width or 136)
             w.valueChanged.connect(lambda v, k=spec.key: self._user_set(k, float(v)))
         elif kind == "combo":
             if spec.editable:
@@ -444,7 +448,9 @@ class FormBuilder(QObject):
         w.blockSignals(True)
         try:
             if isinstance(w, (QCheckBox, Toggle)):
-                w.setChecked(bool(value))
+                # недоступный переключатель показывается выключенным: серый «включён»
+                # сбивает с толку. Сохранённое значение при этом не меняется.
+                w.setChecked(bool(value) and w.isEnabled())
             elif isinstance(w, QSpinBox):
                 try:
                     w.setValue(int(value))

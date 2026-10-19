@@ -122,8 +122,8 @@ def defaults() -> dict:
     # --------------------------------------------------------- инфографика
     d["infographic_enabled"] = _bool("INFOGRAPHIC_ENABLED", False)
     d["infographic_gate_sec"] = _int("INFOGRAPHIC_START_SEC", 0)
-    d["infographic_provider"] = _choice(str(cfg("INFOGRAPHIC_IMG_PROVIDER", "fastgen")),
-                                        [p for p, _ in catalog.IMAGE_PROVIDERS], "fastgen")
+    d["infographic_provider"] = _choice(str(cfg("INFOGRAPHIC_IMG_PROVIDER", "veononstop")),
+                                        [p for p, _ in catalog.IMAGE_PROVIDERS], "veononstop")
     d["infographic_vertex_model"] = _choice(str(cfg("INFOGRAPHIC_VERTEX_MODEL", catalog.VERTEX_IMAGE_DEFAULT)),
                                             [m for m, _ in catalog.VERTEX_IMAGE_MODELS], catalog.VERTEX_IMAGE_DEFAULT)
     d["infographic_cheapvibe_model"] = _choice(str(cfg("INFOGRAPHIC_CHEAPVIBE_MODEL", "gpt-image-2")),
@@ -132,8 +132,6 @@ def defaults() -> dict:
                                               [s for s, _ in catalog.CHEAPVIBE_SIZES], "1536x1024")
     d["infographic_cheapvibe_quality"] = _choice(str(cfg("INFOGRAPHIC_CHEAPVIBE_QUALITY", "medium")),
                                                  catalog.CHEAPVIBE_QUALITIES, "medium")
-    d["infographic_fastgen_model"] = _choice(str(cfg("INFOGRAPHIC_FASTGEN_MODEL", "NARWHAL")),
-                                             [m for m, _ in catalog.FASTGEN_MODELS], "NARWHAL")
     d["infographic_cinai_model"] = _choice(str(cfg("INFOGRAPHIC_CINAI_MODEL", cfg("CINAI_MODEL", ""))),
                                            [m for m, _ in catalog.CINAI_MODELS], catalog.CINAI_MODEL_DEFAULT)
     d["infographic_cinai_quality"] = "1K"     # у бесплатных моделей CinAI разрешение не выбирается
@@ -145,7 +143,7 @@ def defaults() -> dict:
     # все готовые маршруты картинок, поэтому в .env они сохраняются именно так.
     provider = env_text("BEGO_IMAGE_PROVIDER", "")
     ig = provider if provider in ROUTED_IMAGE_PROVIDERS else str(cfg("PIPELINE_IMG_GEN", "veononstop"))
-    d["img_gen"] = _choice(ig, ("fastgen", "veononstop", "vertex", "cheapvibe", "varag", "cinai", "skip"),
+    d["img_gen"] = _choice(ig, ("veononstop", "vertex", "cheapvibe", "varag", "cinai", "skip"),
                            "veononstop")
     d["varag_image_parallel"] = max(1, min(16, _int("VARAG_IMAGE_PARALLEL", 4)))
     d["cheapvibe_size"] = _choice(str(cfg("CHEAPVIBE_IMAGE_SIZE", "1536x1024")),
@@ -167,12 +165,7 @@ def defaults() -> dict:
     d["vertex_video_resolution"] = _choice(str(cfg("VERTEX_VIDEO_RESOLUTION", "")),
                                            [m for m, _ in catalog.VERTEX_RESOLUTIONS], "")
     d["vertex_video_parallel"] = max(1, _int("VERTEX_VIDEO_PARALLEL", 2))
-    d["fg_quota_veo_fallback"] = _on("FASTGEN_QUOTA_FALLBACK_VEONONSTOP", True)
-    d["veo_quota_fg_fallback"] = _on("VEONONSTOP_QUOTA_FALLBACK_FASTGEN", True)
     d["veo_quota_t2v_fallback"] = _on("VEONONSTOP_QUOTA_FALLBACK_T2V", False)
-    d["fastgen_model"] = _choice(str(cfg("FASTGEN_MODEL", "FLOWER")), [m for m, _ in catalog.FASTGEN_MODELS], "FLOWER")
-    d["fastgen_api_key"] = env_text("BEGO_FASTGEN_KEY_SLOT", "main") or "main"
-    d["fastgen_parallel"] = _int("FASTGEN_MAX_PARALLEL", 4)
     d["veo_banana_model"] = _choice(str(cfg("VEONONSTOP_BANANA_MODEL", "GEM_PIX_2")),
                                     [m for m, _ in catalog.BANANA_MODELS], "GEM_PIX_2")
     d["veo_imggen_key"] = env_text("BEGO_IMGGEN_KEY_SLOT", "") or env_text("VEONONSTOP_IMGGEN_KEY_SLOT", "1") or "1"
@@ -186,7 +179,8 @@ def defaults() -> dict:
     d["cinai_quality"] = "1K"
 
     # --------------------------------------------------------- ремиксер
-    d["remix_engine"] = _choice(str(cfg("REMIX_ENGINE", "grok")), [e for e, _ in catalog.REMIX_ENGINES], "grok")
+    # ремиксер — CinAI или «Выкл»; прежние движки (FastGen и др.) переводятся на CinAI
+    d["remix_engine"] = _choice(str(cfg("REMIX_ENGINE", "cinai")), [e for e, _ in catalog.REMIX_ENGINES], "cinai")
     d["cinai_remix_quality"] = "1K"
     d["cinai_remix_model"] = _choice(str(cfg("CINAI_REMIX_MODEL", "")), [m for m, _ in catalog.CINAI_REMIX_MODELS],
                                      catalog.CINAI_REMIX_MODELS[0][0])
@@ -394,18 +388,18 @@ def upgrade_values(values: dict) -> dict:
         values["video_mode"] = "i2v"
     # убранный переключатель «Интро через i2v, остальное через t2v»
     values.pop("intro_i2v_t2v", None)
-    # Gemini и KIE.ai убраны: вижн стока — Codex, ремиксер KieAI -> FastGen Grok,
-    # переписывание промптов моделью Gemini -> модель Codex по умолчанию
+    # Gemini и KIE.ai убраны: вижн стока — Codex, переписывание промптов моделью Gemini ->
+    # модель Codex по умолчанию
     if values.get("stock_vision_provider") not in (None, *(p for p, _ in catalog.VISION_PROVIDERS)):
         values["stock_vision_provider"] = "codex"
         values.pop("stock_vision_model", None)
-    if values.get("remix_engine") == "kieai":
-        values["remix_engine"] = "grok"
     if str(values.get("rewrite_model", "")).startswith("gemini:"):
         values.pop("rewrite_model", None)
     # CinAI: только бесплатные модели картинок; платные/квотные -> значение по умолчанию.
     # Разрешение у бесплатных моделей не выбирается — всегда 1K.
-    if values.get("remix_engine") in ("cinai_grok", "cinai_gpt"):
+    # ремиксер: всё, кроме «Выкл», теперь CinAI (FastGen убран: grok / flower / openai;
+    # прежние kieai, cinai_grok, cinai_gpt)
+    if "remix_engine" in values and values["remix_engine"] != "off":
         values["remix_engine"] = "cinai"
     cinai_free = {m for m, _ in catalog.CINAI_MODELS}
     for key in ("cinai_model", "infographic_cinai_model"):
@@ -429,10 +423,13 @@ def upgrade_values(values: dict) -> dict:
     for key in ("vertex_image_model", "infographic_vertex_model"):
         if key in values and values[key] not in vertex_models:
             values[key] = catalog.VERTEX_IMAGE_RENAMED.get(values[key], catalog.VERTEX_IMAGE_DEFAULT)
-    # GEM_PIX у FastGen — та же Banana 2, что и NARWHAL
-    for key in ("fastgen_model", "infographic_fastgen_model"):
-        if values.get(key) == "GEM_PIX":
-            values[key] = "NARWHAL"
+    # FastGen убран: картинки и инфографика -> VeoNonStop, его настройки больше не нужны
+    for key in ("img_gen", "infographic_provider"):
+        if values.get(key) == "fastgen":
+            values[key] = "veononstop"
+    for key in ("fastgen_model", "infographic_fastgen_model", "fastgen_api_key", "fastgen_parallel",
+                "fg_quota_veo_fallback", "veo_quota_fg_fallback"):
+        values.pop(key, None)
     for key in _OLD_FORMAT_KEYS + _OLD_STORY_KEYS:
         values.pop(key, None)
     return sync_frame_format(sync_cheapvibe_quality(sync_video_skip(values)))
@@ -440,3 +437,112 @@ def upgrade_values(values: dict) -> dict:
 
 # Ключи, которые не относятся к настройкам генерации и не попадают в пресет
 NON_PRESET_KEYS = {"single_prompt_path", "logo_path", "sg_global_path"}
+
+
+# ------------------------------------------------------- связи параметров
+# Параметр, у которого нет смысла без другого, не должен оставаться включённым: иначе он
+# либо незаметно влияет на прогон, либо (например, апскейл видео) блокирует соседние кнопки.
+
+def video_off(v: dict) -> bool:
+    """Видео не генерируется: «Пропустить» у провайдера или режима."""
+    return v.get("video_mode") == "skip" or v.get("video_provider") == "skip"
+
+
+def slideshow(v: dict) -> bool:
+    """«Слайдшоу»: видео сцен не делается, только картинки с зумом."""
+    return v.get("clip_mode") == "slideshow"
+
+
+def parallax_supported(v: dict) -> bool:
+    """Параллакс работает в i2v и без видео (оживляет каждый N-й готовый кадр)."""
+    return v.get("video_mode") == "i2v" or video_off(v)
+
+
+# Переключатель имеет смысл только при условии: условие перестало выполняться — он
+# выключается (прежнее значение запоминается), выполняется снова — значение возвращается.
+CONDITION_LINKS = (
+    ("i2v_parallax", parallax_supported),
+    # апскейл видео — функция VeoNonStop; включённый у другого провайдера, он запирал 1080p/4K склейки
+    ("video_upscale", lambda v: v.get("video_provider") == "veononstop" and not video_off(v)),
+    ("inflight_mode", lambda v: v.get("video_mode") == "i2v" and not slideshow(v)),
+    ("codex_adapt_var", lambda v: v.get("prompt_mode") == "perclip" and not slideshow(v)),
+    ("veo_quota_t2v_fallback", lambda v: not video_off(v) and not slideshow(v)),
+)
+
+# Главный переключатель и его зависимые: (главный, зависимые, нужен ли хотя бы один
+# зависимый, какие зависимые включить, если вернуть нечего).
+#  • главный выключили — зависимые выключаются, их значения запоминаются;
+#  • главный включили — зависимые возвращаются как были;
+#  • включили зависимый — главный включается сам;
+#  • выключили последний нужный зависимый — главный выключается (без него он ничего не делает).
+BOOL_LINKS = (
+    ("i2v_parallax", ("i2v_parallax_ai", "i2v_parallax_stock"), True, {"i2v_parallax_ai": True}),
+    ("stock_enabled", ("stock_src_local", "stock_src_pexels", "stock_src_pixabay"), True,
+     {"stock_src_pexels": True}),
+    ("subtitles_enabled", ("subtitles_custom",), False, {}),
+)
+
+
+def sync_links(prev: dict, cur: dict, memory: dict) -> dict:
+    """Изменения, которые следуют из связей после перехода prev -> cur.
+
+    memory — память прежних значений между вызовами (живёт на странице, меняется на месте).
+    Возвращает {ключ: значение} — что нужно выставить дополнительно.
+    """
+    cur = dict(cur)
+    updates: dict = {}
+
+    def put(key, value) -> None:
+        if cur.get(key) != value:
+            cur[key] = value
+            updates[key] = value
+
+    for child, condition in CONDITION_LINKS:
+        mem = ("cond", child)
+        if not condition(cur):
+            if cur.get(child):
+                memory[mem] = True
+                put(child, False)
+        elif not condition(prev) and mem in memory:
+            put(child, memory.pop(mem))
+    for parent, children, need_any, fallback in BOOL_LINKS:
+        mem = ("link", parent)
+        was_on, now_on = bool(prev.get(parent)), bool(cur.get(parent))
+        switched_on = [c for c in children if cur.get(c) and not prev.get(c)]
+        if was_on and not now_on:
+            memory[mem] = {c: bool(prev.get(c, cur.get(c))) for c in children}
+            for c in children:
+                put(c, False)
+        elif now_on and not was_on:
+            if not switched_on:
+                for c, value in (memory.pop(mem, None) or {}).items():
+                    put(c, value)
+            if need_any and not any(cur.get(c) for c in children):
+                for c, value in fallback.items():
+                    put(c, value)
+        elif now_on:
+            if need_any and not any(cur.get(c) for c in children) and any(prev.get(c) for c in children):
+                memory[mem] = {c: bool(prev.get(c)) for c in children}
+                put(parent, False)
+        elif switched_on:
+            memory.pop(mem, None)
+            put(parent, True)
+    return updates
+
+
+def normalize_links(values: dict) -> dict:
+    """Привести полный набор значений к согласованному виду (на месте): после загрузки
+    сессии, пресета или значений по умолчанию, где связи могли быть нарушены."""
+    for child, condition in CONDITION_LINKS:
+        if child in values and not condition(values):
+            values[child] = False
+    for parent, children, need_any, _fallback in BOOL_LINKS:
+        if parent not in values:
+            continue
+        if not values[parent]:
+            for c in children:
+                if c in values:
+                    values[c] = False
+        elif need_any and not any(values.get(c) for c in children):
+            values[parent] = False
+    return values

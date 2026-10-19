@@ -53,7 +53,7 @@ def _veo_active(selection: str) -> list[int]:
 def cancel_server_tasks(only_veononstop: bool = False) -> None:
     """Снять серверные задачи всех провайдеров («Стоп»). Процессы к этому моменту уже убиты.
 
-    • FastGen, VeoNonStop — все задачи на каждом настроенном ключе;
+    • VeoNonStop — все задачи на каждом настроенном ключе;
     • VARAG — все активные задачи ключа (hard-cancel {"all": true}), где бы они ни были запущены;
     • RoyalTechno — задачи из журнала (units/job_journal.py): снять можно только по id.
     У Vertex, CheapVibeCode и CinAI отмены в API нет — их запросы обрываются вместе с процессом.
@@ -62,23 +62,6 @@ def cancel_server_tasks(only_veononstop: bool = False) -> None:
     """
     import params as config
     totals: dict = {}
-
-    if not only_veononstop:
-        try:
-            from units.fastgen_engine import FastGenClient
-            totals["FastGen"] = 0
-            for attr in ("FASTGEN_API_KEY", "FASTGEN_API_KEY_2", "FASTGEN_API_KEY_3", "FASTGEN_API_KEY_4",
-                         "FASTGEN_API_KEY_BACKUP"):
-                key = getattr(config, attr, "")
-                if not key:
-                    continue
-                try:
-                    res = FastGenClient(api_key=key).cancel_all_tasks() or {}
-                    totals["FastGen"] += int(res.get("total_cancelled", 0)) if isinstance(res, dict) else 0
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[WARN] FastGen cancel ({attr}): {exc}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[WARN] FastGen: {exc}")
 
     try:
         from units.veo_client import VeoNonStopClient
@@ -177,7 +160,7 @@ def main() -> int:
         return 0
 
     if task == "imagegen":
-        engine = a.get("engine", "fastgen")
+        engine = a.get("engine", "veononstop")
         project = a["project_dir"]
         from units.media_io import quarantine_broken
         quarantine_broken(project)                       # обрезанные прошлыми запусками — сделать заново
@@ -193,12 +176,6 @@ def main() -> int:
         result = None
         if engine == "none":
             pass                                         # картинки «Пропустить» — только инфографика
-        elif engine == "fastgen":
-            from units.fastgen_engine import generate_all_images
-            result = generate_all_images(project, api_key=a.get("api_key") or None,
-                                         max_parallel=int(a.get("parallel", 4)), model=a.get("model"),
-                                         aspect_ratio=a.get("aspect"), dual_key=bool(a.get("dual")),
-                                         preflight=not a.get("skip_preflight", False))
         elif engine == "veononstop":
             from units.veo_stills import generate_all_images
             ups = {"2k": "UPSAMPLE_IMAGE_RESOLUTION_2K", "4k": "UPSAMPLE_IMAGE_RESOLUTION_4K"}.get(

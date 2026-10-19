@@ -25,7 +25,7 @@ from ..services import presets as preset_store
 from ..services import procs
 from ..pipeline.defaults import MIX_KEYS, mix_active
 from ..pipeline.defaults import source_mix as source_mix_values
-from ..ui.widgets import Chip, MixBar, button, label, repolish, set_tip
+from ..ui.widgets import Chip, FlowBox, MixBar, button, label, repolish, set_tip
 
 
 class _Relay(QObject):
@@ -76,7 +76,7 @@ def preset_bar(page) -> QWidget:
     lay.setSpacing(6)
     row = QHBoxLayout()
     combo = Combo()
-    combo.setMinimumWidth(220)
+    combo.setMinimumWidth(180)
     combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     set_tip(combo, T("Сохранённые наборы настроек всего конвейера. Выберите пресет — он применится разом.",
                      "Saved sets of all pipeline settings. Pick a preset to apply it at once."))
@@ -378,18 +378,16 @@ def source_mix(page) -> QWidget:
                    "чтобы делить клипы между источниками.",
                    "The whole video is AI generation. Turn on stock, infographics or motion graphics\n"
                    "to split the clips between sources.")
-    legend = QHBoxLayout()
-    legend.setSpacing(8)
+    legend = FlowBox(spacing=8)            # подписи долей переносятся, а не распирают колонку
     chips = {}
     for key, _short, name, color in MIX_PARTS:
         chip = Chip()
         chip.setStyleSheet(f"QLabel {{ border-color: {theme.c(color)}; }}")
         chip.setTextFormat(Qt.RichText)
         chips[key] = (chip, name, color)
-        legend.addWidget(chip)
-    legend.addStretch(1)
+        legend.add(chip)
     lay.addWidget(bar)
-    lay.addLayout(legend)
+    lay.addWidget(legend)
 
     def show_legend(values: dict) -> None:
         for key, (chip, name, color) in chips.items():

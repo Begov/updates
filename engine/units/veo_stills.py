@@ -1,5 +1,5 @@
 """
-VeoNonStop imggen — batch-генерация изображений (альтернатива FastGen)
+VeoNonStop imggen — batch-генерация изображений
 
 Режимы:
   imagen       — Imagen 3.5 text-to-image
@@ -346,31 +346,10 @@ def _banana_model_chain() -> List[str]:
     return chain + [m for m in _BANANA_MODEL_CHAIN_DEFAULT if m not in chain]
 
 
-def _veo_fastgen_fallback_enabled() -> bool:
-    """Разрешено ли уводить остаток на FastGen при исчерпании дневной квоты."""
-    return bool(getattr(config, 'VEONONSTOP_QUOTA_FALLBACK_FASTGEN', True))
-
-
-def _fastgen_key_configured() -> bool:
-    """Return whether at least one FastGen key is configured."""
-    return any(
-        str(getattr(config, key, '') or '').strip()
-        for key in (
-            'FASTGEN_API_KEY',
-            'FASTGEN_API_KEY_BACKUP',
-            'FASTGEN_API_KEY_2',
-            'FASTGEN_API_KEY_3',
-            'FASTGEN_API_KEY_4',
-        )
-    )
-
-
 def _veo_no_capacity_should_fallback_to_t2v() -> bool:
-    """Resolve the terminal action after Veo ImageGen capacity is exhausted."""
-    return (
-        not _fastgen_key_configured()
-        or bool(getattr(config, 'VEONONSTOP_QUOTA_FALLBACK_T2V', False))
-    )
+    """Уводить ли остаток в T2V, когда ёмкость VeoNonStop ImageGen исчерпана
+    (переключатель «Квота VeoNonStop исчерпана → T2V»). Иначе этап останавливается."""
+    return bool(getattr(config, 'VEONONSTOP_QUOTA_FALLBACK_T2V', False))
 
 
 # Гасит попытки воркеров, когда квота признана исчерпанной на уровне провайдера.
@@ -523,11 +502,11 @@ def _try_generate(
             # кулдаун (как generic-фейл ниже). Раньше был attempt -= 1 (не тратил)
             # + фикс 10с — и при ПОСТОЯННОМ рейтлимите клип крутился бесконечно, не
             # возвращая терминальный статус: цикл не докручивался → MAX_SILENT_CYCLES
-            # и FastGen-фоллбэк не срабатывали (юзеру приходилось жать Stop). Теперь
+            # не срабатывал (юзеру приходилось жать Stop). Теперь
             # после max_retries клип падает как error → внешний цикл добьёт его.
             result['error'] = f'rate limit (429): {e}'
             # Дневная квота ключа — это не рейтлимит: ретраить нечего, сегодня всё.
-            # Поднимаем флаг наверх, там решают: запасной ключ / FastGen / ожидание.
+            # Поднимаем флаг наверх, там решают: запасной ключ / T2V / остановка.
             if _is_daily_quota_error(str(e)):
                 result['quota_exhausted'] = True
                 _quota_stop_event.set()
@@ -959,8 +938,8 @@ def generate_all_images(
         aspect_ratio:   Соотношение сторон
         ref_dir:        Папка с style-reference (для banana_ref). Если None — PROJECT/ref/
         silent:         Авто-режим (без интерактивных вопросов):
-                        2 авто-цикла → если ещё остались failed →
-                        фоллбэк на FastGen для остатков
+                        авто-циклы (VEONONSTOP_MAX_SILENT_CYCLES) → остаток
+                        уходит в добор перед склейкой
         active_keys:    Список 1-based индексов ключей [1], [1,2], [1,2,3,4] и т.д.
 
     Returns:
@@ -1210,7 +1189,7 @@ def generate_all_images(
     # ------------------------------------------------------------------
     # 3b. Предполётная проверка рефов для banana_ref (Preflight)
     # ------------------------------------------------------------------
-    if mode in ('banana_ref', 'banana2_ref') and ref_images and preflight and config.FASTGEN_PREFLIGHT_REFS and config.REMIX_AVAILABLE:
+    if mode in ('banana_ref', 'banana2_ref') and ref_images and preflight and config.REF_PREFLIGHT and config.REMIX_AVAILABLE:
         import tempfile, os as _os
 
         _pf_aspect = aspect_ratio or config.VEONONSTOP_ASPECT_RATIO
@@ -1481,77 +1460,6 @@ def generate_all_images(
     # Shared running-average stats across all cycles (thread-safe)
     _ok_run = {'n': 0, 'total': 0.0, 'lock': threading.Lock(), 'wall_start': time.time()}
 
-    def _fastgen_has_quota() -> bool:
-        """Есть ли у FastGen часовая квота прямо сейчас (для решения о фолбэке)."""
-        try:
-            # units.fastgen_engine, НЕ плоский fastgen: плоский импорт даёт второй
-            # экземпляр модуля со своими модульными состояниями (в т.ч. стоп-событием),
-            # и Stop из GUI такой экземпляр не гасит.
-            from units.fastgen_engine import FastGenClient, parse_usage_remaining
-            _fg_key = str(getattr(config, 'FASTGEN_API_KEY', '') or '').strip()
-            if not _fg_key:
-                return False
-            _rem = parse_usage_remaining(FastGenClient(api_key=_fg_key).get_usage())
-        except Exception as exc:
-            logging.warning(f"[FG CHECK] FastGen usage request failed — {exc}")
-            print(f"  {_YELLOW}[FG CHECK]{_RESET} FastGen usage request failed "
-                  f"({str(exc)[:100]}) — assuming it can try")
-            return True   # не смогли спросить — пусть FastGen сам решит на живом запросе
-        print(f"  [FG CHECK] FastGen hourly quota: {'?' if _rem is None else _rem}")
-        return _rem is None or _rem > 0
-
-    def _delegate_to_fastgen(reason: str) -> int:
-        """Отдать ВЕСЬ остаток FastGen одним вызовом (провайдер-уровневый переход).
-
-        allow_veo_fallback=False: наши ключи VeoNonStop уже мертвы, звать их
-        обратно из FastGen нельзя. Кулдаун по часовой квоте FastGen при этом
-        остаётся его заботой — он умеет ждать границу часа сам.
-        """
-        _ids = sorted(pending_prompts.keys())
-        if not _ids:
-            return 0
-        print(f"\n  {_YELLOW}[FASTGEN FALLBACK]{_RESET} {reason} — handing "
-              f"{len(_ids)} clip(s) to FastGen (full auto-chain)")
-        logging.warning(f"Delegating {len(_ids)} clips to FastGen: {reason}")
-        if mode in ('banana_ref', 'banana2_ref'):
-            print(f"  {_YELLOW}[FASTGEN FALLBACK]{_RESET} {mode}: FastGen will auto-load "
-                  f"refs from project/ref/")
-        try:
-            from units.fastgen_engine import generate_all_images as _fastgen_generate
-            _fastgen_generate(
-                project_dir=str(project_path),
-                clip_ids=_ids,
-                silent=True,
-                allow_veo_fallback=False,
-            )
-        except Exception as exc:
-            logging.exception(f"FastGen fallback failed: {exc}")
-            print(f"  {_RED}[FASTGEN FALLBACK]{_RESET} failed: {str(exc)[:200]}")
-
-        # Источник правды — диск: FastGen писал файлы сам.
-        _moved = 0
-        for cid in list(_ids):
-            for ext in ('.png', '.jpeg', '.jpg', '.webp'):
-                p = output_dir / f"{cid:03d}{ext}"
-                try:
-                    _exists = p.exists() and p.stat().st_size > 0
-                except OSError:
-                    _exists = False
-                if _exists:
-                    accumulated_ok[cid] = {
-                        'id': cid, 'status': 'ok', 'file': str(p), 'error': None,
-                        'duration_sec': 0, 'task_id': None, 'block_count': 0,
-                        'fallback_provider': 'fastgen',
-                    }
-                    pending_prompts.pop(cid, None)
-                    _moved += 1
-                    break
-        print(f"  {_GREEN}[FASTGEN FALLBACK]{_RESET} FastGen generated {_moved}/{len(_ids)} "
-              f"clip(s); still missing: {len(pending_prompts)}")
-        logging.warning(f"FastGen fallback result: {_moved}/{len(_ids)} generated, "
-                        f"{len(pending_prompts)} still missing")
-        return _moved
-
     while True:
         cycle_num += 1
         cycle_ids = sorted(pending_prompts.keys())
@@ -1707,7 +1615,7 @@ def generate_all_images(
         # ── Терминальная нехватка ёмкости — решение уровня ПРОВАЙДЕРА ─────────
         # Два случая, и оба уже отработали свои локальные средства:
         #   quota_exhausted      — дневная квота НАШЕГО ключа (429). Лечится
-        #                          запасным ключом или другим провайдером.
+        #                          запасным ключом или переходом в T2V.
         #   all_models_exhausted — клип перебрал ВСЕ banana-модели, у сервиса нет
         #                          cookies ни под одну (смена ключа не поможет).
         # Ретраить и докручивать циклы в обоих случаях бессмысленно.
@@ -1722,7 +1630,7 @@ def generate_all_images(
                                 f"{sorted(_quota_dead_slots)}; {len(failed_ids)} clips left")
             else:
                 print(f"\n  {_RED}[MODEL POOL]{_RESET} all banana model pools exhausted "
-                      f"with {len(failed_ids)} clip(s) left — switching provider")
+                      f"with {len(failed_ids)} clip(s) left")
                 logging.warning(f"All banana model pools exhausted; {len(failed_ids)} clips left")
 
             # Запасной ключ ищем ТОЛЬКО когда кончилась квота ключа. Если пусты пулы
@@ -1752,7 +1660,7 @@ def generate_all_images(
                 except Exception as exc:
                     logging.warning(f"VeoNonStop spare-key init failed: {exc}")
                     print(f"  {_YELLOW}[VEO SWITCH]{_RESET} spare key init failed "
-                          f"({str(exc)[:120]}) — falling back to FastGen")
+                          f"({str(exc)[:120]})")
 
             _reason = ('VeoNonStop daily image quota exhausted' if _key_quota_dead
                        else 'all VeoNonStop banana model pools exhausted')
@@ -1763,37 +1671,20 @@ def generate_all_images(
                     f"  {_YELLOW}[T2V FALLBACK]{_RESET} {_reason}; "
                     f"{len(failed_ids)} remaining clip(s) will use T2V"
                 )
-                logging.warning(
-                    "%s; requesting T2V fallback (%s)",
-                    _reason,
-                    "no FastGen key" if not _fastgen_key_configured()
-                    else "GUI policy",
-                )
+                logging.warning("%s; requesting T2V fallback (GUI policy)", _reason)
                 break
-            if not _veo_fastgen_fallback_enabled():
-                print(f"  {_YELLOW}[NO CAPACITY]{_RESET} {_reason}; FastGen fallback disabled "
-                      f"in settings — stopping with {len(failed_ids)} missing")
-                logging.error(f"{_reason}: FastGen fallback disabled "
-                              f"(VEONONSTOP_QUOTA_FALLBACK_FASTGEN=off)")
-                break
-
-            print(f"  {_YELLOW}[NO CAPACITY]{_RESET} {_reason} — switching provider to FastGen")
-            _fastgen_has_quota()      # печатаем состояние часовой квоты в лог
-            _delegate_to_fastgen(_reason)
-            if not pending_prompts:
-                break
-            # FastGen тоже не смог (его собственный кулдаун уже отработал внутри) —
-            # дальше крутить VeoNonStop нечем: дневная квота/пулы вернутся завтра.
-            print(f"  {_RED}[NO CAPACITY]{_RESET} {len(pending_prompts)} clip(s) still missing "
-                  f"after FastGen; VeoNonStop capacity returns tomorrow")
-            logging.error(f"After FastGen fallback {len(pending_prompts)} clips still missing; "
-                          f"VeoNonStop capacity resets tomorrow")
+            # Дальше крутить VeoNonStop нечем: дневная квота/пулы вернутся завтра.
+            # Недостающие сцены доберёт Pre-concat fallback перед склейкой.
+            print(f"  {_YELLOW}[NO CAPACITY]{_RESET} {_reason}; T2V fallback is off — "
+                  f"stopping with {len(failed_ids)} missing (VeoNonStop capacity returns tomorrow)")
+            logging.error(f"{_reason}: stopping with {len(failed_ids)} clips missing "
+                          f"(VEONONSTOP_QUOTA_FALLBACK_T2V=off)")
             break
 
         # ── Silent mode: авто-ретрай ──────────────────────────────
         if silent:
             if max_cycles is not None:
-                # Limited-cycles mode (used as fallback from fastgen.py — no nested FastGen fallback)
+                # Limited-cycles mode: не больше max_cycles циклов
                 if cycle_num < max_cycles:
                     print(f"\n  {_YELLOW}[SILENT]{_RESET} {len(failed_ids)} images failed, auto-retry ({cycle_num + 1}/{max_cycles})...")
                     logging.info(f"Silent max_cycles={max_cycles}: {len(failed_ids)} failed after cycle {cycle_num}, retrying")
@@ -1803,53 +1694,15 @@ def generate_all_images(
                     logging.info(f"Silent max_cycles={max_cycles}: stopping after {cycle_num} cycle(s), {len(failed_ids)} still failed")
                     break
             elif cycle_num < config.VEONONSTOP_MAX_SILENT_CYCLES:
-                # Авто-ретрай: до N циклов VeoNonStop перед фоллбэком на FastGen
+                # Авто-ретрай: до N циклов VeoNonStop
                 _sc = config.VEONONSTOP_MAX_SILENT_CYCLES
                 print(f"\n  {_YELLOW}[SILENT]{_RESET} {len(failed_ids)} images failed, auto-retrying (cycle {cycle_num + 1}/{_sc})...")
                 logging.info(f"Silent mode: {len(failed_ids)} failed after cycle {cycle_num}, auto-retrying ({cycle_num + 1}/{_sc})")
                 continue
             else:
-                # После 3 циклов VeoNonStop — фоллбэк на FastGen.
-                # FastGen auto-scans project/ref/ через scan_references() → рефы подхватываются автоматически,
-                # персонаж сохраняется даже в banana_ref режиме.
+                # Циклы VeoNonStop кончились — остаток доберёт Pre-concat fallback перед склейкой.
                 print(f"\n  {_YELLOW}[SILENT]{_RESET} {len(failed_ids)} images still failed after {cycle_num} cycles.")
-                if mode in ('banana_ref', 'banana2_ref'):
-                    print(f"  {_YELLOW}[SILENT]{_RESET} {mode} mode: FastGen will auto-load refs from project/ref/")
-                    logging.info(f"Silent mode {mode}: falling back to FastGen — refs will be picked up from project/ref/")
-                print(f"  {_YELLOW}[SILENT]{_RESET} Falling back to FastGen for remaining {len(failed_ids)} images...")
-                logging.info(f"Silent mode: {len(failed_ids)} failed after {cycle_num} cycles, falling back to FastGen")
-
-                try:
-                    # units.fastgen_engine — тот же экземпляр, что видит GUI (стоп-событие,
-                    # реестр активных клиентов). Плоский `import fastgen` заводил второй.
-                    from units.fastgen_engine import generate_all_images as fastgen_generate
-
-                    print(f"\n  {_YELLOW}[FASTGEN FALLBACK]{_RESET} Delegating {len(failed_ids)} clips to FastGen (full auto-chain)...")
-                    logging.info(f"Delegating {len(failed_ids)} clips to FastGen with full fallback chain (silent=True)")
-
-                    fg_result = fastgen_generate(
-                        project_dir=str(project_path),
-                        clip_ids=list(failed_ids),
-                        silent=True,
-                        # Мы — вызывающая сторона: FastGen не должен звать наш
-                        # imggen обратно при своей квоте (кольцо провайдеров).
-                        allow_veo_fallback=False,
-                    )
-
-                    # Sync results — check files on disk (most reliable)
-                    fg_ok = fg_result.get('generated', 0)
-                    print(f"  {_GREEN}[FASTGEN FALLBACK]{_RESET} Generated {fg_ok} images")
-                    logging.info(f"FastGen fallback done: {fg_ok} generated")
-
-                    for cid in list(pending_prompts.keys()):
-                        if any((output_dir / f"{cid:03d}{ext}").exists()
-                               for ext in ('.png', '.jpg', '.jpeg', '.webp')):
-                            accumulated_ok[cid] = {'id': cid, 'status': 'ok'}
-                            pending_prompts.pop(cid, None)
-
-                except Exception as e:
-                    print(f"  {_RED}[FASTGEN FALLBACK]{_RESET} FastGen fallback failed: {e}")
-                    logging.error(f"FastGen fallback failed: {e}")
+                logging.info(f"Silent mode: {len(failed_ids)} failed after {cycle_num} cycles, stopping")
                 break
 
         # ── Interactive mode: спрашиваем юзера ────────────────────

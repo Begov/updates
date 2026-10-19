@@ -5,27 +5,29 @@ import copy
 import json
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu,
-    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSplitter, QTableWidget, QTableWidgetItem,
-    QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMenu, QSizePolicy,
+    QMessageBox, QProgressBar, QScrollArea, QSplitter, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
-from qfluentwidgets import SmoothScrollArea, TransparentToolButton
+from qfluentwidgets import FluentIcon, SmoothScrollArea, ToolButton, TransparentToolButton
 from ..ui.widgets import Table, Toggle, attach_hint, card_icon
 
 from .. import catalog, engine_link, envfile, paths, state, theme
 from ..i18n import T, tr
 from ..pipeline import runplan
-from ..pipeline.defaults import CHEAPVIBE_QUALITY_PAIRS, defaults, source_mix, upgrade_values
+from ..pipeline.defaults import (
+    CHEAPVIBE_QUALITY_PAIRS, defaults, normalize_links, source_mix, sync_links, upgrade_values,
+)
 from ..pipeline.runner import PipelineRunner
 from ..pipeline.runplan import FileBinding
 from ..pipeline.sections import sections
 from ..services import presets as preset_store
 from ..services import procs
 from ..ui.form import FormBuilder, Store
-from ..ui.widgets import Card, Chip, LogView, Segmented, button, label, repolish, set_tip
+from ..ui.widgets import Card, Chip, Column, FlowBox, LogView, Segmented, button, label, repolish, set_tip
 from . import pipeline_parts as parts
 
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
@@ -34,6 +36,13 @@ STAGES = [T("Очередь", "Queue"), T("Транскрипция", "Transcrib
           T("Картинки", "Images"), T("Видео", "Video"), T("Склейка", "Concat")]
 
 COL_STAR, COL_FILE, COL_STYLE, COL_PRESET, COL_LOGO, COL_COVER, COL_STATUS = range(7)
+SUMMARY_TWO_COLUMNS = 560   # px: с этой ширины сводка «Запуска» идёт в две колонки
+
+
+def _show_text(label: QLabel, text: str) -> None:
+    """Подпись видна, только когда ей есть что сказать: пустые строки не занимают место."""
+    label.setText(text)
+    label.setVisible(bool(text))
 
 
 class QueueItem:
@@ -50,7 +59,7 @@ class QueueTable(Table):
     filesDropped = Signal(list)
 
     def __init__(self):
-        super().__init__(0, 8)
+        super().__init__(0, 7)
         self.setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DropOnly)
 
@@ -85,10 +94,19 @@ class PipelinePage(QWidget):
         # «Пропустить» у провайдера видео: что вернуть, когда видео снова включат
         self._video_mode_before_skip = "i2v"
         self._video_provider_before_skip = "veononstop"
+        # провайдер картинок до «Пропустить» (t2v): его вернут слайдшоу и вислайд, им нужны картинки
+        self._img_before_skip = "veononstop"
         self.preset_combo_refill = None
 
         values = defaults()
         values.update(self._load_session(values))
+        normalize_links(values)
+        # Связи параметров (defaults.sync_links): значения до последнего изменения и память
+        # о том, что было у выключенных зависимых. Пока форма заполняется пачкой (пресет,
+        # сброс, пересборка окна), связи не применяются — значения согласуются в конце.
+        self._link_prev = dict(values)
+        self._link_memory: dict = {}
+        self._links_paused = False
         self.store = Store(values)
         self.builder = FormBuilder(self.store, self)
         self.runner = PipelineRunner(self._take_next, app.concat_queue)
@@ -121,11 +139,13 @@ class PipelinePage(QWidget):
         ll.setSpacing(8)
         nav = QHBoxLayout()
         nav.setSpacing(4)
+        nav_icons = FlowBox(spacing=2)
         self._nav_buttons = []
         self.cards: dict[str, Card] = {}
         scroll = SmoothScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setObjectName("Transparent")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # поля переносятся, а не уезжают вбок
         holder = QWidget()
         holder.setObjectName("Transparent")
         hl = QVBoxLayout(holder)
@@ -139,21 +159,22 @@ class PipelinePage(QWidget):
             nav_btn = TransparentToolButton(card_icon(sec["key"]))
             set_tip(nav_btn, sec["title"])
             nav_btn.clicked.connect(lambda _c=False, c=card: self._jump(scroll, c))
-            nav.addWidget(nav_btn)
+            nav_icons.add(nav_btn)
             if sec.get("visible") is not None:
                 self.builder.show_when(card, sec["visible"])
                 self.builder.show_when(nav_btn, sec["visible"])
         hl.addStretch(1)
         scroll.setWidget(holder)
-        nav.addStretch(1)
+        nav.addWidget(nav_icons, 1, Qt.AlignTop)
         collapse = button(T("Свернуть все", "Collapse all"), "ghost", None,
                           lambda: [c.set_collapsed(True) for c in self.cards.values()])
         expand = button(T("Развернуть все", "Expand all"), "ghost", None,
                         lambda: [c.set_collapsed(False) for c in self.cards.values()])
-        nav.addWidget(collapse)
-        nav.addWidget(expand)
+        nav.addWidget(collapse, 0, Qt.AlignTop)
+        nav.addWidget(expand, 0, Qt.AlignTop)
         ll.addLayout(nav)
         ll.addWidget(scroll, 1)
+        left.setMinimumWidth(490)
         splitter.addWidget(left)
 
         # ---------- правая колонка: очередь, сводка, запуск, журнал
@@ -163,7 +184,7 @@ class PipelinePage(QWidget):
         rl.setSpacing(12)
         rsplit = QSplitter(Qt.Vertical)
         rsplit.setChildrenCollapsible(False)
-        top = QWidget()
+        top = Column()
         tl = QVBoxLayout(top)
         tl.setContentsMargins(0, 0, 0, 0)
         tl.setSpacing(10)
@@ -176,11 +197,21 @@ class PipelinePage(QWidget):
         lcl.setContentsMargins(12, 10, 12, 12)
         self.logview = LogView(title=T("Журнал конвейера", "Pipeline log"))
         lcl.addWidget(self.logview)
+        log_card.setMinimumHeight(240)
         rsplit.addWidget(log_card)
         rsplit.setSizes([520, 380])
-        rl.addWidget(rsplit)
+        rscroll = SmoothScrollArea()
+        rscroll.setWidgetResizable(True)
+        rscroll.setObjectName("Transparent")
+        rscroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        rsplit.setObjectName("Transparent")
+        rscroll.setWidget(rsplit)
+        rl.addWidget(rscroll)
+        right.setMinimumWidth(440)
         splitter.addWidget(right)
-        splitter.setSizes(state.get("pipeline_split2", [820, 470]))
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes(state.get("pipeline_split2", [760, 560]))
         splitter.splitterMoved.connect(lambda *_: state.put(pipeline_split2=splitter.sizes()))
 
         QShortcut(QKeySequence("Ctrl+Return"), self, activated=self.start)
@@ -199,29 +230,32 @@ class PipelinePage(QWidget):
                           "Sources: audio or text scripts. Processed in order, each as a separate run with its own\n"
                           "settings. Drag files here, you can add more while running. Double-click a cell to assign\n"
                           "a style guide, preset, logo or cover to that file."))
-        bar = QHBoxLayout()
-        bar.setSpacing(6)
-        bar.addWidget(button(T("Добавить…", "Add…"), "small", None, self.add_files, icon="ADD"))
-        bar.addWidget(button(T("Убрать", "Remove"), "small", None, self.remove_selected, icon="REMOVE"))
-        bar.addWidget(button(T("Очистить", "Clear"), "small", None, self.clear_queue, icon="DELETE"))
-        up = QToolButton()
-        up.setText("↑")
+        bar = FlowBox(spacing=6)
+        bar.add(button(T("Добавить…", "Add…"), "primary", T("Добавить аудио или видео в очередь.",
+                                                            "Add audio or video to the queue."),
+                       self.add_files, icon="ADD"))
+        bar.add(button(T("Убрать", "Remove"), "small", T("Убрать выделенные файлы из очереди.",
+                                                         "Remove the selected files from the queue."),
+                       self.remove_selected, icon="REMOVE"))
+        bar.add(button(T("Очистить", "Clear"), "small", T("Убрать из очереди все файлы.", "Remove all files from the queue."),
+                       self.clear_queue, icon="DELETE"))
+        up = ToolButton(FluentIcon.UP)
+        set_tip(up, T("Поднять выделенный файл в очереди", "Move the selected file up"))
         up.clicked.connect(lambda: self.move_selected(-1))
-        down = QToolButton()
-        down.setText("↓")
+        down = ToolButton(FluentIcon.DOWN)
+        set_tip(down, T("Опустить выделенный файл в очереди", "Move the selected file down"))
         down.clicked.connect(lambda: self.move_selected(1))
-        bar.addWidget(up)
-        bar.addWidget(down)
+        bar.add(up)
+        bar.add(down)
         star = button(T("★ Запомнить настройки", "★ Pin settings"), "small",
                       T("Запомнить ВСЕ текущие настройки для выделенного файла: он будет обработан именно с ними,\n"
                         "даже если потом вы поменяете форму для следующих файлов.",
                         "Pin ALL current settings to the selected file: it will run with exactly these settings,\n"
                         "even if you change the form for the next files."), self.pin_selected)
-        bar.addWidget(star)
-        bar.addStretch(1)
+        bar.add(star)
         self.queue_count = QLabel("")
         self.queue_count.setProperty("role", "muted")
-        bar.addWidget(self.queue_count)
+        card.head_extra.addWidget(self.queue_count)
         card.add(bar)
 
         self.table = QueueTable()
@@ -256,20 +290,21 @@ class PipelinePage(QWidget):
                              "A document describing the visual style and characters — direction won't start without it.\n"
                              "• One for all — shared by the whole queue.\n"
                              "• Per file — own for each file ('Style guide' column).")))
-        sg = QHBoxLayout()
-        sg.setSpacing(8)
+        # переключатель и поле файла; в узкой колонке поле уходит на свою строку во всю ширину
+        sg = FlowBox(spacing=8, vspacing=8)
         self.sg_mode = Segmented([("one_for_all", T("один на все", "one for all")),
                                   ("individual", T("для каждого", "per file"))], self.store.get("sg_mode"))
         self.sg_mode.valueChanged.connect(lambda v: self.store.set("sg_mode", v))
-        sg.addWidget(self.sg_mode, 0, Qt.AlignLeft)
+        sg.add(self.sg_mode)
         from ..ui.widgets import PathPicker
         self.sg_path = PathPicker("file", "Text (*.txt *.md);;All (*.*)", T("файл стайлгайда", "style guide file"))
         self.sg_path.set_path(self.store.get("sg_global_path", ""))
         self.sg_path.pathChanged.connect(lambda p: self.store.set("sg_global_path", p))
-        sg.addWidget(self.sg_path, 1)
-        sg.addStretch(0)   # когда поле пути скрыто, переключатель остаётся слева
+        self.sg_path.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.sg_path.setMinimumWidth(260)
+        sg.add(self.sg_path)
         card.add(sg)
-        sg2 = QHBoxLayout()
+        sg2 = FlowBox(spacing=12)
         self.sg_adapt = Toggle(tr(T("Адаптировать стайлгайд под сюжет (GPT)", "Adapt style guide to the story (GPT)")))
         set_tip(self.sg_adapt, T("Подогнать общий стайлгайд под сюжет конкретного ролика через GPT: подставить нужных\n"
                                  "персонажей, места, детали. Можно переопределить для файла (меню по правой кнопке).",
@@ -277,11 +312,10 @@ class PipelinePage(QWidget):
                                  "details. Can be overridden per file (right-click menu)."))
         self.sg_adapt.setChecked(bool(self.store.get("sg_adapt")))
         self.sg_adapt.toggled.connect(lambda c: self.store.set("sg_adapt", bool(c)))
-        sg2.addWidget(self.sg_adapt)
-        sg2.addStretch(1)
-        sg2.addWidget(button(T("Открыть адаптированный", "Open adapted"), "small",
-                             T("Открыть последний адаптированный стайлгайд.", "Open the latest adapted style guide."),
-                             self._open_adapted))
+        sg2.add(self.sg_adapt)
+        sg2.add(button(T("Открыть адаптированный", "Open adapted"), "small",
+                       T("Открыть последний адаптированный стайлгайд.", "Open the latest adapted style guide."),
+                       self._open_adapted))
         card.add(sg2)
         self._refresh_table()
         return card
@@ -292,23 +326,35 @@ class PipelinePage(QWidget):
         self.summary.setProperty("role", "dim")
         self.summary.setWordWrap(True)
         self.summary.setTextFormat(Qt.RichText)
+        self.summary.installEventFilter(self)
         card.add(self.summary)
-        steps = QHBoxLayout()
-        steps.setSpacing(4)
+        steps = FlowBox(spacing=3, vspacing=6)
         self.stage_labels = []
         for i, name in enumerate(STAGES):
             chip = Chip(tr(name))
+            chip.setProperty("compact", True)
             self.stage_labels.append(chip)
-            steps.addWidget(chip)
-            if i < len(STAGES) - 1:
-                arrow = QLabel("›")
-                arrow.setProperty("role", "muted")
-                steps.addWidget(arrow)
-        steps.addStretch(1)
+            if not i:
+                steps.add(chip)
+                continue
+            # стрелка едет вместе со следующим этапом: при переносе она не повисает в конце строки
+            pair = QWidget()
+            pl = QHBoxLayout(pair)
+            pl.setContentsMargins(0, 0, 0, 0)
+            pl.setSpacing(3)
+            arrow = QLabel("›")
+            arrow.setProperty("role", "muted")
+            arrow.setFixedWidth(8)
+            arrow.setAlignment(Qt.AlignCenter)
+            pl.addWidget(arrow)
+            pl.addWidget(chip)
+            steps.add(pair)
+        card.add(steps)
         self.current_file = QLabel("")
         self.current_file.setProperty("role", "dim")
-        steps.addWidget(self.current_file)
-        card.add(steps)
+        self.current_file.setWordWrap(True)
+        self.current_file.hide()
+        card.add(self.current_file)
         prog = QHBoxLayout()
         self.task_bar = QProgressBar()
         self.task_bar.setRange(0, 100)
@@ -321,6 +367,7 @@ class PipelinePage(QWidget):
         card.add(prog)
         self.spinner = QLabel("")
         self.spinner.setProperty("role", "muted")
+        self.spinner.hide()
         card.add(self.spinner)
 
         btns = QHBoxLayout()
@@ -332,12 +379,12 @@ class PipelinePage(QWidget):
         self.stop_btn = button(T("Стоп", "Stop"), "danger",
                                T("Прибить процессы конвейера и снять серверные задачи всех провайдеров.",
                                  "Kill the pipeline processes and cancel server tasks of every provider."),
-                               self.runner_stop, icon="PAUSE")
+                               self.runner_stop, icon="CLOSE")
         self.stop_btn.setEnabled(False)
         btns.addWidget(self.start_btn)
         btns.addWidget(self.stop_btn)
         btns.addStretch(1)
-        more = QPushButton(tr(T("Ещё ▾", "More ▾")))
+        more = button(T("Ещё", "More"), "small", T("Другие действия", "More actions"), None, icon="MORE")
         menu = QMenu(more)
         menu.addAction(tr(T("Сохранить как значения по умолчанию", "Save as defaults")), self.save_defaults)
         menu.addAction(tr(T("Перезапустить задачи ключа VeoNonStop", "Restart VeoNonStop key tasks")), self.app.restart_key)
@@ -389,6 +436,11 @@ class PipelinePage(QWidget):
         self._rules_busy = True
         try:
             self._apply_rules(key, value)
+            if not self._links_paused:
+                for k, v in sync_links(self._link_prev, self.store.values, self._link_memory).items():
+                    self.store.set(k, v)
+                self._link_prev = dict(self.store.values)
+            self._refresh_buttons()
         finally:
             self._rules_busy = False
         self._refresh_summary()
@@ -423,18 +475,26 @@ class PipelinePage(QWidget):
             elif value != "skip" and s.get("video_provider") == "skip":
                 s.set("video_provider", self._video_provider_before_skip or "veononstop")
             if value == "t2v" and s.get("img_gen") != "skip":
+                self._img_before_skip = s.get("img_gen")
                 s.set("img_gen", "skip")
                 self.log(tr(T("Видео t2v: картинки не нужны — генерация картинок переключена в «Пропустить».",
                               "Video t2v: images are not needed — image generation switched to Skip.")), "INFO")
         elif key == "img_gen" and value == "skip":
+            if self._link_prev.get("img_gen") not in (None, "skip"):
+                self._img_before_skip = self._link_prev["img_gen"]
             if s.get("video_mode") == "i2v":
                 s.set("video_mode", "t2v")
-        elif key == "clip_mode" and value == "vislide":
-            if s.get("video_mode") == "t2v":
+        elif key == "clip_mode" and value in ("slideshow", "vislide"):
+            if value == "vislide" and s.get("video_mode") == "t2v":
                 s.set("video_mode", "i2v")
                 self.log(tr(T("Вислайд несовместим с t2v (статичным клипам нужны картинки) — видео переключено на i2v.",
                               "Vislide is incompatible with t2v (still clips need images) — video switched to i2v.")),
                          "WARNING")
+            if s.get("img_gen") == "skip":
+                # слайдам нужны картинки: возвращаем провайдера, который был до «Пропустить»
+                s.set("img_gen", self._img_before_skip or "veononstop")
+                self.log(tr(T("Слайдам нужны картинки — генерация картинок снова включена.",
+                              "Slides need images — image generation is back on.")), "INFO")
         elif key in dict(CHEAPVIBE_QUALITY_PAIRS):
             # у Banana 2 есть только low: недоступное модели качество сводим к доступному
             quality_key = dict(CHEAPVIBE_QUALITY_PAIRS)[key]
@@ -443,6 +503,10 @@ class PipelinePage(QWidget):
             s.set("render_mode", "720p")
         elif key == "render_mode" and value in ("1080p", "4k") and s.get("video_upscale"):
             s.set("render_mode", "720p")
+
+    def _refresh_buttons(self) -> None:
+        """Доступность отдельных кнопок переключателей — по итоговым значениям (после правил и связей)."""
+        s = self.store
         # Кнопки 1080p/4K недоступны при апскейле видео
         seg = self.builder.widget("render_mode")
         if isinstance(seg, Segmented):
@@ -452,6 +516,10 @@ class PipelinePage(QWidget):
         if isinstance(vm, Segmented):
             vm.set_button_enabled("i2v", s.get("img_gen") != "skip")
             vm.set_button_enabled("t2v", s.get("clip_mode") != "vislide")
+        ig = self.builder.widget("img_gen")
+        if isinstance(ig, Segmented):
+            # слайдшоу и вислайд показывают картинки — без их генерации ролик собрать не из чего
+            ig.set_button_enabled("skip", s.get("clip_mode") not in ("slideshow", "vislide"))
         for model_key, quality_key in CHEAPVIBE_QUALITY_PAIRS:
             cq = self.builder.widget(quality_key)
             if isinstance(cq, Segmented):
@@ -465,8 +533,7 @@ class PipelinePage(QWidget):
             return
         v = self.store.values
         files = len(self.queue)
-        img = {"fastgen": f"FastGen · {dict(catalog.FASTGEN_MODELS).get(v['fastgen_model'], v['fastgen_model'])}",
-               "veononstop": f"VeoNonStop · {dict(catalog.BANANA_MODELS).get(v['veo_banana_model'], v['veo_banana_model'])}",
+        img = {"veononstop": f"VeoNonStop · {dict(catalog.BANANA_MODELS).get(v['veo_banana_model'], v['veo_banana_model'])}",
                "vertex": f"Vertex · {dict(catalog.VERTEX_IMAGE_MODELS).get(v['vertex_image_model'], v['vertex_image_model'])}",
                "cheapvibe": f"CheapVibeCode · {dict(catalog.CHEAPVIBE_MODELS).get(v['cheapvibe_model'], v['cheapvibe_model'])}"
                             f" · {v['cheapvibe_size']} · {v['cheapvibe_quality']}",
@@ -509,14 +576,37 @@ class PipelinePage(QWidget):
         ]
         if extras:
             rows.append((T("Источники", "Sources"), " · ".join(extras)))
-        cells = "".join(
-            f"<tr><td style='color:{theme.c('muted')};padding-right:10px'>{tr(k)}</td><td>{val}</td></tr>"
-            for k, val in rows)
-        self.summary.setText(f"<table cellspacing='0' cellpadding='1'>{cells}</table>")
+        self._summary_rows = [(tr(k), val) for k, val in rows]
+        self._render_summary()
+
+    def _render_summary(self) -> None:
+        """Сводка таблицей: в широкой колонке — в две пары столбцов, в узкой — в одну."""
+        rows = getattr(self, "_summary_rows", [])
+        pairs = 2 if self.summary.width() >= SUMMARY_TWO_COLUMNS else 1
+        self._summary_pairs = pairs
+        key = f"color:{theme.c('muted')};padding-right:10px"
+        half = (len(rows) + pairs - 1) // pairs
+        lines = []
+        for i in range(half):
+            parts = []
+            for col in range(pairs):
+                j = i + col * half
+                gap = "padding-left:28px;" if col else ""
+                if j < len(rows):
+                    parts.append(f"<td style='{gap}{key}'>{rows[j][0]}</td><td>{rows[j][1]}</td>")
+            lines.append("<tr>" + "".join(parts) + "</tr>")
+        self.summary.setText(f"<table cellspacing='0' cellpadding='1'>{''.join(lines)}</table>")
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt API)
+        # колонка стала шире или уже — сводка перестраивается в одну или две пары столбцов
+        if obj is getattr(self, "summary", None) and event.type() == QEvent.Resize:
+            pairs = 2 if self.summary.width() >= SUMMARY_TWO_COLUMNS else 1
+            if pairs != getattr(self, "_summary_pairs", 0):
+                QTimer.singleShot(0, self._render_summary)
+        return super().eventFilter(obj, event)
 
     # =============================================================== очередь
     def _item_row(self, item: QueueItem, row: int) -> None:
-        v = self.store.values
         b = item.binding
 
         def cell(col, text, tip="", color=None, align=Qt.AlignLeft | Qt.AlignVCenter):
@@ -537,14 +627,16 @@ class PipelinePage(QWidget):
         cell(COL_COVER, Path(b.cover).name if b.cover else "—", b.cover)
         icon = {"running": "⏳", "done": "✅", "failed": "❌", "cancelled": "⛔"}.get(item.status, "")
         cell(COL_STATUS, icon, item.status, align=Qt.AlignCenter)
-        self.table.setColumnHidden(COL_STYLE, v.get("sg_mode") != "individual")
-        self.table.setColumnHidden(COL_LOGO, not (v.get("watermark") == "logo" and v.get("logo_mode") == "individual"))
 
     def _refresh_table(self) -> None:
         selected = {i.row() for i in self.table.selectedIndexes()}
         self.table.setRowCount(len(self.queue))
         for row, item in enumerate(self.queue):
             self._item_row(item, row)
+        # столбцы «Стайлгайд» и «Логотип» нужны, только когда они задаются для каждого файла
+        v = self.store.values
+        self.table.setColumnHidden(COL_STYLE, v.get("sg_mode") != "individual")
+        self.table.setColumnHidden(COL_LOGO, not (v.get("watermark") == "logo" and v.get("logo_mode") == "individual"))
         for row in selected:
             if row < len(self.queue):
                 self.table.selectRow(row)
@@ -701,16 +793,29 @@ class PipelinePage(QWidget):
             return
         base = defaults()
         values = {k: v for k, v in upgrade_values(dict(preset)).items() if k in base}
-        self.store.update(values)
+        self._bulk_update(values)
         self.builder.refresh()
         self.log(tr(T(f"Пресет применён: {name}", f"Preset applied: {name}")), "SUCCESS")
+
+    def _bulk_update(self, values: dict) -> None:
+        """Записать пачку значений (пресет, сброс, пересборка окна) и согласовать связи один раз:
+        по ходу записи значения временно расходятся, и связи сработали бы не по делу."""
+        self._links_paused = True
+        try:
+            self.store.update(values)
+            fixed = normalize_links(dict(self.store.values))
+            self.store.update({k: v for k, v in fixed.items() if self.store.values.get(k) != v})
+        finally:
+            self._links_paused = False
+        self._link_prev = dict(self.store.values)
+        self._link_memory.clear()
 
     def reset_defaults(self) -> None:
         engine_link.reload_params()
         fresh = defaults()
         for key in ("sg_global_path", "single_prompt_path", "logo_path"):
             fresh.pop(key, None)
-        self.store.update(fresh)
+        self._bulk_update(fresh)
         self.builder.refresh()
         self.log(tr(T("Значения сброшены к сохранённым по умолчанию.", "Values reset to the saved defaults.")), "INFO")
 
@@ -797,8 +902,8 @@ class PipelinePage(QWidget):
         r.log.connect(self.log)
         r.stage.connect(self._set_stage)
         r.task.connect(self._set_task)
-        r.current.connect(lambda n, p, t: self.current_file.setText(f"{n}  ({p}/{t})" if n else ""))
-        r.spinner.connect(self.spinner.setText)
+        r.current.connect(lambda n, p, t: _show_text(self.current_file, f"{n}  ({p}/{t})" if n else ""))
+        r.spinner.connect(lambda text: _show_text(self.spinner, text))
         r.running.connect(self._set_running)
         r.item_status.connect(self._set_item_status)
         r.finished.connect(self._finished)
@@ -872,7 +977,7 @@ class PipelinePage(QWidget):
 
     def import_state(self, data: dict) -> None:
         base = defaults()
-        self.store.update({k: v for k, v in data.get("values", {}).items() if k in base})
+        self._bulk_update({k: v for k, v in data.get("values", {}).items() if k in base})
         self.queue = data.get("queue", [])
         self.builder.refresh()
         self._refresh_table()

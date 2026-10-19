@@ -1,7 +1,7 @@
 """
 live_veo.py — Watch generated/ and animate images as they appear via VeoNonStop i2v.
 
-Run in parallel with FastGen to animate images without waiting for all to finish.
+Run in parallel with ImageGen to animate images without waiting for all to finish.
 Supports dual-key and single-prompt / per-clip prompt modes.
 """
 import sys

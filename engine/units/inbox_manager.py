@@ -458,7 +458,7 @@ def setup_project(audio_file: Path, ready_dir: Path, projects_dir: Path, concat_
         shutil.copy2(str(style_guide), str(dest_style))
         print(f"   [OK] {style_filename}")
 
-    # Копирование ref/ (style-reference images для banana_ref / FastGen)
+    # Копирование ref/ (style-reference images для banana_ref)
     # Приоритет: BEGO_REF_MAP[audio_name] → BEGO_REF_STAGING → inbox/ref/
     # BEGO_REFS_DISABLED=1 (BegoFrame) — референсов в программе нет: не копируем ничего,
     # иначе забытые файлы в inbox/ref/ молча попали бы в генерацию.

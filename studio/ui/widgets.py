@@ -162,22 +162,30 @@ class Chip(QLabel):
 
 # ------------------------------------------------------------ сегменты
 SEGMENT_GAP = 6   # px между кнопками переключателя
+# элементы с такой политикой в строке с переносом забирают свободное место
+_GROW_POLICIES = (QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
 
 
 class _FlowRow(QLayout):
-    """Раскладка кнопок с переносом на следующую строку, когда не хватает ширины.
+    """Раскладка с переносом на следующую строку, когда не хватает ширины.
 
     Своя, а не FlowLayout библиотеки: та объявляет желаемой шириной ширину ОДНОЙ
     кнопки (в ряду с другими полями переключатель сжимался в столбик), а скрытые
     кнопки отсеивает по isVisible() — до показа окна это все кнопки, и высота
-    получалась нулевой. Здесь желаемая ширина — все кнопки в одну строку, а
+    получалась нулевой. Здесь желаемая ширина — все элементы в одну строку, а
     пропускаются только явно скрытые (isHidden).
+
+    align — как элементы разной высоты стоят в строке: "center" (по середине), "top" или
+    "bottom" (поля с подписью сверху и переключатели без подписи — на одной линии).
+    Растягиваемые по ширине элементы (Expanding) делят между собой свободное место строки.
     """
 
-    def __init__(self, parent=None, spacing: int = 6):
+    def __init__(self, parent=None, spacing: int = 6, vspacing: int | None = None, align: str = "top"):
         super().__init__(parent)
         self._items: list = []
         self._gap = spacing
+        self._vgap = spacing if vspacing is None else vspacing
+        self._align = align
         self.setContentsMargins(0, 0, 0, 0)
 
     def addItem(self, item):  # noqa: N802 (Qt API)
@@ -195,11 +203,18 @@ class _FlowRow(QLayout):
     def _shown(self):
         return [i for i in self._items if not (i.widget() and i.widget().isHidden())]
 
+    @staticmethod
+    def _hint(item) -> QSize:
+        return item.sizeHint().expandedTo(item.minimumSize())
+
     def expandingDirections(self):  # noqa: N802 (Qt API)
         return Qt.Orientation(0)
 
     def hasHeightForWidth(self):  # noqa: N802 (Qt API)
-        return True
+        # Нет: высоту под число строк виджет-владелец выставляет себе сам минимальной
+        # (_fit_height). Иначе раскладки-родители считают её по-своему и при переносе
+        # строк дают блоку меньше, чем нужно, — соседние элементы налезают.
+        return False
 
     def heightForWidth(self, width):  # noqa: N802 (Qt API)
         return self._place(QRect(0, 0, width, 0), move=False)
@@ -210,8 +225,8 @@ class _FlowRow(QLayout):
 
     def sizeHint(self):  # noqa: N802 (Qt API)
         items = self._shown()
-        width = sum(i.sizeHint().width() for i in items) + self._gap * max(0, len(items) - 1)
-        height = max((i.sizeHint().height() for i in items), default=0)
+        width = sum(self._hint(i).width() for i in items) + self._gap * max(0, len(items) - 1)
+        height = max((self._hint(i).height() for i in items), default=0)
         return QSize(width, height)
 
     def minimumSize(self):  # noqa: N802 (Qt API)
@@ -219,43 +234,127 @@ class _FlowRow(QLayout):
         # из heightForWidth. Если считать минимум «все кнопки столбиком», карточки
         # резервируют эту высоту и в них появляются пустые полосы.
         items = self._shown()
-        width = max((i.sizeHint().width() for i in items), default=0)
-        height = max((i.sizeHint().height() for i in items), default=0)
+        width = max((i.minimumSize().width() for i in items), default=0)
+        height = max((self._hint(i).height() for i in items), default=0)
         return QSize(width, height)
 
-    def _place(self, rect, move: bool) -> int:
-        x, y, row_h = rect.x(), rect.y(), 0
+    def _lines(self, width: int) -> list[list[tuple]]:
+        """Разбить элементы на строки: [(элемент, ширина)] для каждой строки."""
+        lines, line, used = [], [], 0
         for item in self._shown():
-            hint = item.sizeHint()
-            if x > rect.x() and x + hint.width() > rect.right() + 1:
-                x, y, row_h = rect.x(), y + row_h + self._gap, 0
+            w = min(self._hint(item).width(), max(1, width))
+            if line and used + self._gap + w > width:
+                lines.append(line)
+                line, used = [], 0
+            used += (self._gap if line else 0) + w
+            line.append((item, w))
+        if line:
+            lines.append(line)
+        return lines
+
+    def _place(self, rect, move: bool) -> int:
+        y = rect.y()
+        for n, line in enumerate(self._lines(rect.width())):
+            free = rect.width() - sum(w for _, w in line) - self._gap * (len(line) - 1)
+            grow = [item for item, _ in line
+                    if item.widget() and item.widget().sizePolicy().horizontalPolicy() in _GROW_POLICIES]
+            sized = []
+            for item, w in line:
+                if free > 0 and item in grow:
+                    w += free // len(grow)
+                h = item.heightForWidth(w) if item.hasHeightForWidth() else self._hint(item).height()
+                sized.append((item, w, max(h, 0)))
+            line_h = max(h for *_, h in sized)
+            if n:
+                y += self._vgap
             if move:
-                item.setGeometry(QRect(QPoint(x, y), hint))
-            x += hint.width() + self._gap
-            row_h = max(row_h, hint.height())
-        return y + row_h - rect.y()
+                x = rect.x()
+                for item, w, h in sized:
+                    top = y + {"bottom": line_h - h, "center": (line_h - h) // 2}.get(self._align, 0)
+                    item.setGeometry(QRect(QPoint(x, top), QSize(w, h)))
+                    x += w + self._gap
+            y += line_h
+        return y - rect.y()
+
+
+class Column(QWidget):
+    """Колонка блоков, чей минимум по высоте учитывает перенос текста при текущей ширине.
+
+    Разделитель (QSplitter) и область прокрутки берут минимум без учёта переноса строк:
+    блок с переносимым текстом оказывается выше заявленного, и соседям достаётся меньше
+    их минимума — они налезают друг на друга. Здесь минимум считается при текущей ширине.
+    """
+
+    def minimumSizeHint(self):  # noqa: N802 (Qt API)
+        base = super().minimumSizeHint()
+        lay = self.layout()
+        if lay is not None and lay.hasHeightForWidth() and self.width() > 0:
+            return QSize(base.width(), max(base.height(), lay.totalMinimumHeightForWidth(self.width())))
+        return base
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        if event.oldSize().width() != event.size().width():
+            self.updateGeometry()                  # с новой шириной меняется и нужная высота
+
+
+class FlowBox(QWidget):
+    """Ряд виджетов, который переносится на новые строки, когда не хватает ширины.
+
+    Высоту под нужное число строк выставляет сам: вложенные раскладки и области
+    прокрутки высоту-по-ширине (heightForWidth) не учитывают.
+    """
+
+    def __init__(self, spacing: int = 6, vspacing: int | None = None, align: str = "center", parent=None):
+        super().__init__(parent)
+        self._flow = _FlowRow(self, spacing, vspacing, align)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+    def add(self, widget: QWidget) -> QWidget:
+        self._flow.addWidget(widget)
+        return widget
+
+    def _fit_height(self) -> None:
+        need = self._flow.heightForWidth(max(1, self.width()))
+        if need and need != self.minimumHeight():
+            self.setMinimumHeight(need)
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        self._fit_height()
+
+    def event(self, event):  # noqa: D401 (Qt API)
+        # элемент скрыли/показали или он сменил размер — пересчитать число строк
+        if event.type() == QEvent.LayoutRequest:
+            self._fit_height()
+        return super().event(event)
 
 
 class _SegmentButton(PushButton):
-    """Кнопка переключателя: отдельная, со своей рамкой — как обычные кнопки программы."""
+    """РљРЅРѕРїРєР° РїРµСЂРµРєР»СЋС‡Р°С‚РµР»СЏ: РѕС‚РґРµР»СЊРЅР°СЏ, СЃРѕ СЃРІРѕРµР№ СЂР°РјРєРѕР№ вЂ” РєР°Рє РѕР±С‹С‡РЅС‹Рµ РєРЅРѕРїРєРё РїСЂРѕРіСЂР°РјРјС‹."""
 
     def __init__(self, text: str = "", parent=None):
-        # конструктор PushButton библиотеки перегружен и сам вызывает __init__(parent=…),
-        # поэтому текст — отдельно, не через super().__init__(text, parent)
+        # РєРѕРЅСЃС‚СЂСѓРєС‚РѕСЂ PushButton Р±РёР±Р»РёРѕС‚РµРєРё РїРµСЂРµРіСЂСѓР¶РµРЅ Рё СЃР°Рј РІС‹Р·С‹РІР°РµС‚ __init__(parent=вЂ¦),
+        # РїРѕСЌС‚РѕРјСѓ С‚РµРєСЃС‚ вЂ” РѕС‚РґРµР»СЊРЅРѕ, РЅРµ С‡РµСЂРµР· super().__init__(text, parent)
         super().__init__(parent)
         self.setText(text)
         self.isSelected = False
         setFont(self, 14)
         self.setFixedSize(self.fontMetrics().horizontalAdvance(text) + 32, theme.CONTROL_HEIGHT)
 
-    def setSelected(self, selected: bool) -> None:  # noqa: N802 (как у кнопок библиотеки)
+    def setSelected(self, selected: bool) -> None:  # noqa: N802 (РєР°Рє Сѓ РєРЅРѕРїРѕРє Р±РёР±Р»РёРѕС‚РµРєРё)
         if self.isSelected != selected:
             self.isSelected = selected
             self.update()
 
     def paintEvent(self, _event):  # noqa: N802 (Qt API)
         p = theme.colors()
-        if not self.isEnabled():
+        if not self.isEnabled() and self.isSelected:
+            # недоступный, но выбранный: видно, какой вариант вернётся, когда поле снова доступно
+            bg = QColor(p["accent_soft"])
+            bg.setAlpha(110)
+            bg, border, fg = bg, QColor(p["border_strong"]), QColor(p["muted"])
+        elif not self.isEnabled():
             bg, border, fg = QColor(0, 0, 0, 0), QColor(p["border"]), QColor(p["muted"])
         elif self.isSelected:
             bg, border, fg = QColor(p["accent_soft"]), QColor(p["accent"]), QColor(p["text"])
@@ -290,9 +389,7 @@ class Segmented(QWidget):
         self._value = None
         self.items: dict = {}
         self._flow = _FlowRow(self, SEGMENT_GAP)
-        policy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        policy.setHeightForWidth(True)
-        self.setSizePolicy(policy)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.set_options(options)
         if value is not None:
             self.set_value(value)
@@ -571,7 +668,7 @@ CARD_ICONS = {
     "remixer": ("SYNC",), "videogen": ("VIDEO",), "source_mix": ("PIE_SINGLE",),
     "render_concat": ("CAMERA",), "cp_projects": ("FOLDER",), "cp_stages": ("DEVELOPER_TOOLS", "SETTING"),
     "cp_queue": ("HISTORY",), "cp_finalize": ("SEND",), "set_look": ("PALETTE",), "set_updates": ("UPDATE", "SYNC"), "set_codex": ("ROBOT",),
-    "set_cinai": ("CLOUD",), "set_ai": ("CHAT",), "set_fastgen": ("SPEED_HIGH", "SEND"), "set_veo": ("VIDEO",), "set_vertex": ("CLOUD",),
+    "set_cinai": ("CLOUD",), "set_ai": ("CHAT",), "set_veo": ("VIDEO",), "set_vertex": ("CLOUD",),
     "set_cheapvibe": ("PHOTO",), "set_varag": ("SEND",),
     "set_stock": ("LIBRARY",),
 }
@@ -735,12 +832,16 @@ class LogView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
-        bar = QHBoxLayout()
-        bar.setSpacing(6)
-        if title:
-            head = QLabel(tr(title))
-            head.setObjectName("CardTitle")
-            bar.addWidget(head)
+        # Панель журнала: в широкой колонке — одна строка, в узкой фильтр и поиск
+        # уходят на вторую строку (см. resizeEvent), чтобы ничего не сминалось.
+        self._bar = QHBoxLayout()
+        self._bar.setSpacing(6)
+        self._bar2 = QHBoxLayout()
+        self._bar2.setSpacing(6)
+        self._head = QLabel(tr(title)) if title else None
+        if self._head is not None:
+            self._head.setObjectName("CardTitle")
+            self._bar.addWidget(self._head)
         self.level = Combo()
         for code, text in (("", T("Все", "All")), ("WARNING", T("Предупр. и ошибки", "Warnings+errors")),
                            ("ERROR", T("Только ошибки", "Errors only"))):
@@ -749,7 +850,15 @@ class LogView(QWidget):
         self.search = SearchLineEdit()
         self.search.setPlaceholderText(tr(T("Поиск в журнале…", "Search log…")))
         self.search.setClearButtonEnabled(True)
-        self.follow = Toggle(tr(T("Автопрокрутка", "Auto-scroll")))
+        self.search.setMinimumWidth(140)
+        self._tools = QWidget()
+        tools = QHBoxLayout(self._tools)
+        tools.setContentsMargins(0, 0, 0, 0)
+        tools.setSpacing(6)
+        tools.addWidget(self.level)
+        tools.addWidget(self.search, 1)
+        self._follow_text = tr(T("Автопрокрутка", "Auto-scroll"))
+        self.follow = Toggle(self._follow_text)
         self.follow.setChecked(True)
         set_tip(self.follow, T("Держать журнал прокрученным к последней строке.",
                                "Keep the log scrolled to the newest line."))
@@ -759,13 +868,18 @@ class LogView(QWidget):
         clear = TransparentToolButton(FluentIcon.DELETE)
         set_tip(clear, T("Очистить журнал", "Clear log"))
         clear.clicked.connect(self.clear)
-        bar.addStretch(1)
-        bar.addWidget(self.level)
-        bar.addWidget(self.search, 1)
-        bar.addWidget(self.follow)
-        bar.addWidget(save)
-        bar.addWidget(clear)
-        lay.addLayout(bar)
+        # сначала — узкий вид (фильтр и поиск второй строкой): у широкого большая минимальная
+        # ширина, и журнал не смог бы сузиться до размера, при котором переходит в узкий
+        self._bar.addStretch(1)
+        self._bar.addWidget(self.follow)
+        self._bar.addWidget(save)
+        self._bar.addWidget(clear)
+        self._bar2.addWidget(self._tools, 1)
+        self._wide = False
+        self._follow_full = self.follow.sizeHint().width()
+        lay.addLayout(self._bar)
+        lay.addLayout(self._bar2)
+        self.setMinimumWidth(300)
 
         self.view = QPlainTextEdit()
         self.view.setObjectName("LogView")
@@ -783,6 +897,33 @@ class LogView(QWidget):
         self.search.textChanged.connect(lambda _t: self._filter_timer.start())
         self.level.currentIndexChanged.connect(lambda _i: self._refilter())
         self.level.setMinimumWidth(140)
+
+    def _head_width(self) -> int:
+        return self._head.sizeHint().width() + 6 if self._head is not None else 0
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API)
+        """Широкая колонка — всё в одну строку; узкая — фильтр и поиск второй строкой;
+        совсем узкая — у переключателя автопрокрутки остаётся только сам переключатель."""
+        super().resizeEvent(event)
+        icons = 2 * 38 + 18
+        wide = self.width() >= self._head_width() + self.level.minimumWidth() + 160 + self._follow_full + icons
+        roomy = wide or self.width() >= self._head_width() + self._follow_full + icons + 24
+        text = self._follow_text if roomy else ""
+        if self.follow.onText != text:
+            self.follow.setOnText(text)
+            self.follow.setOffText(text)
+        if wide == self._wide:
+            return
+        self._wide = wide
+        stretch = 1 if self._head is not None else 0
+        if wide:
+            self._bar2.removeWidget(self._tools)
+            self._bar.takeAt(stretch)                      # растяжка узкого вида
+            self._bar.insertWidget(stretch, self._tools, 1)
+        else:
+            self._bar.removeWidget(self._tools)
+            self._bar.insertStretch(stretch, 1)
+            self._bar2.addWidget(self._tools, 1)
 
     def _passes(self, text: str, level: str) -> bool:
         need = self.level.currentData()

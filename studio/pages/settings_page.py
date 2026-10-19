@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QMessageBox, QScrollArea, QSizePolicy, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import DoubleSpinBox, LineEdit, ListWidget, SmoothScrollArea, SpinBox
 from ..ui.widgets import Combo, Toggle, card_icon
@@ -21,7 +21,7 @@ from .. import catalog, engine_link, envfile, i18n, paths, theme
 from ..i18n import T, tr
 from ..services import monitors as mon
 from ..services import procs
-from ..ui.widgets import LABEL_GAP, Card, Chip, button, label, set_tip
+from ..ui.widgets import LABEL_GAP, Card, Chip, FlowBox, button, label, set_tip
 
 # Описание поля: (ключ, подпись, подсказка, тип, опции)
 #   тип: secret | text | int | float | bool | combo | path | dir
@@ -53,9 +53,6 @@ SECTIONS = [
     ("ai", T("Распознавание речи", "Speech recognition"), "✦", [
         fld("ASSEMBLYAI_API_KEY", "AssemblyAI API key",
             T("Расшифровка речи. Ключ: assemblyai.com → Dashboard.", "Speech transcription. Key: assemblyai.com → Dashboard."), S),
-    ]),
-    ("fastgen", T("FastGen", "FastGen"), "⚡", [
-        fld("FASTGEN_API_KEY", "FastGen API key", T("Генерация картинок и Flow Ultra.", "Image generation and Flow Ultra."), S),
     ]),
     ("veo", T("VeoNonStop", "VeoNonStop"), "▶", [
         fld("VEONONSTOP_API_KEY", "VeoNonStop API key",
@@ -237,7 +234,7 @@ class SettingsPage(QWidget):
         # левая колонка: разделы и поиск
         nav = QFrame()
         nav.setObjectName("Panel")
-        nav.setFixedWidth(220)
+        nav.setFixedWidth(236)
         nl = QVBoxLayout(nav)
         nl.setContentsMargins(10, 10, 10, 10)
         self.search = LineEdit()
@@ -248,6 +245,7 @@ class SettingsPage(QWidget):
         nl.addWidget(self.search)
         self.nav = ListWidget()
         self.nav.setObjectName("Transparent")
+        self.nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         head_items = [("look", T("Интерфейс", "Interface"), "◐"), ("updates", T("Обновления", "Updates"), "⟳")]
         for key, title, icon in head_items + [(k, t, i) for k, t, i, _ in SECTIONS]:
             item = QListWidgetItem(card_icon("set_" + key).icon(), tr(title))
@@ -271,6 +269,7 @@ class SettingsPage(QWidget):
         self.scroll = SmoothScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setObjectName("Transparent")
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)   # ряды переносятся, а не уезжают вбок
         body = QWidget()
         body.setObjectName("Transparent")
         self.body = QVBoxLayout(body)
@@ -293,6 +292,8 @@ class SettingsPage(QWidget):
 
         bar = QHBoxLayout()
         self.save_state = label("", "muted")
+        # длинный путь к .env не должен распирать страницу: лишнее просто обрезается
+        self.save_state.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         bar.addWidget(self.save_state, 1)
         bar.addWidget(button(T("Перечитать", "Reload"), "", T("Отменить несохранённые изменения.", "Discard unsaved changes."),
                              self.load_values, icon="SYNC"))
@@ -332,20 +333,19 @@ class SettingsPage(QWidget):
         card = Card(T("Обновления", "Updates"), "⟳", key="set_updates", collapsible=False)
         self.cards["updates"] = card
         ctl = self.app.updates
-        row = QHBoxLayout()
+        row = FlowBox(spacing=8)
         where = (T("установленная программа", "installed program") if updater.is_installed()
                  else T("рабочая копия — обновления не ставятся", "working copy — updates are not applied"))
-        row.addWidget(label(T(f"Версия {APP_VERSION}", f"Version {APP_VERSION}"), "label",
+        row.add(label(T(f"Версия {APP_VERSION}", f"Version {APP_VERSION}"), "label",
                             T("Выпуски публикуются на GitHub: " + updater.RELEASES_PAGE,
                               "Releases are published on GitHub: " + updater.RELEASES_PAGE)))
         self.update_state = Chip(tr(where))
-        row.addWidget(self.update_state)
-        row.addStretch(1)
-        row.addWidget(button(T("Проверить обновления", "Check for updates"), "primary",
+        row.add(self.update_state)
+        row.add(button(T("Проверить обновления", "Check for updates"), "primary",
                              T("Узнать, есть ли новая версия, и предложить установить её.",
                                "See whether a new version exists and offer to install it."),
                              lambda: ctl.check(manual=True), icon="SYNC"))
-        row.addWidget(button(T("Все выпуски", "All releases"), "ghost", T("Открыть страницу выпусков на GitHub.",
+        row.add(button(T("Все выпуски", "All releases"), "ghost", T("Открыть страницу выпусков на GitHub.",
                                                                           "Open the releases page on GitHub."),
                              lambda: procs.open_path(updater.RELEASES_PAGE)))
         card.add(row)
@@ -377,21 +377,20 @@ class SettingsPage(QWidget):
         card.add(head)
         self.quota = label("", "muted")
         card.add(self.quota)
-        btns = QHBoxLayout()
-        btns.addWidget(button(T("Войти через браузер", "Sign in via browser"), "primary",
+        btns = FlowBox(spacing=8)
+        btns.add(button(T("Войти через браузер", "Sign in via browser"), "primary",
                               T("Откроется окно терминала и страница входа OpenAI.", "A terminal and the OpenAI sign-in page open."),
                               lambda: self.codex_login(False)))
-        btns.addWidget(button(T("Вход по коду", "Sign in with code"), "",
+        btns.add(button(T("Вход по коду", "Sign in with code"), "",
                               T("Для удалённых машин: показывается код, который вводится на любом устройстве.",
                                 "For remote machines: shows a code you enter on any device."), lambda: self.codex_login(True)))
-        btns.addWidget(button(T("Установить / обновить", "Install / update"), "",
+        btns.add(button(T("Установить / обновить", "Install / update"), "",
                               T("Скачать последнюю версию Codex CLI в runtime/codex.", "Download the latest Codex CLI into runtime/codex."),
                               self.codex_install))
-        btns.addWidget(button(T("Квота", "Quota"), "small", T("Обновить квоту подписки.", "Refresh subscription quota."),
+        btns.add(button(T("Квота", "Quota"), "small", T("Обновить квоту подписки.", "Refresh subscription quota."),
                               self.app.monitors.refresh_codex))
-        btns.addWidget(button(T("Папка", "Folder"), "small", T("Открыть ~/.codex.", "Open ~/.codex."),
-                              lambda: procs.open_path(Path(codex_account()["path"]).parent)))
-        btns.addStretch(1)
+        btns.add(button(T("Папка", "Folder"), "small", T("Открыть ~/.codex.", "Open ~/.codex."),
+                        lambda: procs.open_path(Path(codex_account()["path"]).parent)))
         card.add(btns)
         # прокси для Codex: одна строка, тот же формат, что у «Прокси для стоков»
         card.add(label(T("Прокси Codex", "Codex proxy"), "label",
@@ -427,35 +426,32 @@ class SettingsPage(QWidget):
         head.addWidget(self.cinai_state)
         head.addStretch(1)
         card.add(head)
-        btns = QHBoxLayout()
-        btns.addWidget(button(T("Открыть cinai.tv", "Open cinai.tv"), "",
+        btns = FlowBox(spacing=8)
+        btns.add(button(T("Открыть cinai.tv", "Open cinai.tv"), "",
                               T("Войдите на сайте в браузере, затем заберите сессию.", "Sign in on the site, then import the session."),
                               self.cinai_open))
-        btns.addWidget(button(T("Забрать сессию из браузера", "Import browser session"), "primary",
+        btns.add(button(T("Забрать сессию из браузера", "Import browser session"), "primary",
                               T("Найти токены CinAI в Firefox/Chrome/Edge, проверить на сервере и записать в .env.",
                                 "Find CinAI tokens in Firefox/Chrome/Edge, verify on the server and write to .env."),
                               self.cinai_import))
-        btns.addWidget(button(T("Баланс", "Balance"), "small", None, self.app.monitors.refresh_cinai))
-        btns.addStretch(1)
+        btns.add(button(T("Баланс", "Balance"), "small", None, self.app.monitors.refresh_cinai))
         card.add(btns)
 
     def _add_fields(self, card: Card, items: list) -> None:
-        """Короткие поля (числа, списки) идут по три в ряд, длинные (ключи, пути) — на всю ширину."""
+        """Короткие поля (числа, списки) идут в ряд, сколько поместится (на широком экране — по три
+        и больше, на узком — по одному), длинные (ключи, пути) — на всю ширину."""
         narrow: list = []
 
         def flush() -> None:
             if not narrow:
                 return
-            grid = QGridLayout()
-            grid.setHorizontalSpacing(24)
-            grid.setVerticalSpacing(12)
-            for i, row in enumerate(narrow):
-                grid.addWidget(row, i // 3, i % 3, Qt.AlignLeft | Qt.AlignTop)
-            for col in range(3):
-                grid.setColumnMinimumWidth(col, 250)   # компактные колонки одинаковой ширины
-                grid.setColumnStretch(col, 0)
-            grid.setColumnStretch(3, 1)                # свободное место уходит вправо
-            card.add(grid)
+            flow = FlowBox(spacing=24, vspacing=12, align="top")
+            # компактные колонки одинаковой ширины: поля выстраиваются ровными столбцами
+            width = max(250, *(row.sizeHint().width() for row in narrow))
+            for row in narrow:
+                row.setFixedWidth(width)
+                flow.add(row)
+            card.add(flow)
             narrow.clear()
 
         for spec in items:

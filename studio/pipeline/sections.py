@@ -9,6 +9,7 @@ from __future__ import annotations
 from .. import catalog
 from ..i18n import T
 from ..ui.form import Custom, F, Group, Note, Row
+from .defaults import parallax_supported, slideshow, video_off
 
 SEC = T("сек", "sec")
 MIN = T("мин", "min")
@@ -205,11 +206,13 @@ def _intro(page):
               lo=0, hi=9999, suffix=T("сек (0 = выкл)", "sec (0 = off)")),
             Row(F("intro_clip_min", "int", T("от", "from"),
                   T("Минимальная длина сцены во вступлении. 0 = как у остального ролика.",
-                    "Minimum scene length in the intro. 0 = same as the rest."), lo=0, hi=30),
+                    "Minimum scene length in the intro. 0 = same as the rest."), lo=0, hi=30,
+                  enabled=lambda v: v.get("intro_duration", 0) > 0),
                 F("intro_clip_max", "int", T("до", "to"),
                   T("Максимальная длина сцены во вступлении. 0 = как у остального ролика.",
                     "Maximum scene length in the intro. 0 = same as the rest."), lo=0, hi=60,
-                  suffix=T("сек (0 = как везде)", "sec (0 = inherit)")),
+                  suffix=T("сек (0 = как везде)", "sec (0 = inherit)"),
+                  enabled=lambda v: v.get("intro_duration", 0) > 0),
                 label=T("Сцены интро", "Intro scenes")),
             Row(F("cover_hook_sec", "float", None,
                   T("Сколько секунд длится ожившая обложка в начале ролика.\n"
@@ -228,7 +231,8 @@ def _intro(page):
                     "• drift — the camera slides sideways\n• fly_in — flying into the scene\n"
                     "• awaken — the picture 'breathes': hair, steam, water\n"
                     "Texts are edited on the Prompts page."),
-                  options=["zoom_in", "zoom_out", "drift", "fly_in", "awaken"]),
+                  options=["zoom_in", "zoom_out", "drift", "fly_in", "awaken"],
+                  enabled=lambda v: v.get("cover_hook_sec", 0) > 0),
                 label=T("Оживление обложки", "Cover animation")),
         ],
     }
@@ -292,11 +296,12 @@ def _stock(page):
                     F("stock_vision_per_source", "int", T("от каждого стока", "per stock source"),
                       T("Сколько кандидатов гарантированно берётся от каждого включённого стока. 0 — без квоты.",
                         "How many candidates are guaranteed from each enabled stock. 0 — no quota."),
-                      lo=0, hi=6)),
+                      lo=0, hi=6, enabled=lambda v: v.get("stock_vision_candidates", 0) > 0)),
                 F("stock_vision_model", "seg", T("Вижн (Codex)", "Vision (Codex)"),
                   T("Модель Codex, которая смотрит кадры футажей и выбирает подходящий.",
                     "The Codex model that looks at footage frames and picks the right one."),
-                  options=_models("stock_vision_provider", catalog.VISION_MODELS)),
+                  options=_models("stock_vision_provider", catalog.VISION_MODELS),
+                  enabled=lambda v: v.get("stock_vision_candidates", 0) > 0),
                 Row(F("stock_start_sec", "float", T("Старт футажа", "Clip start"),
                       T("С какой секунды резать футаж. Первые секунды часто самые постановочные.",
                         "From which second to cut the footage. The first seconds are often staged."),
@@ -356,8 +361,6 @@ def _infographics(page):
                     "are the same as in 'Image generation'; keys are shared, from Settings."),
                   options=catalog.IMAGE_PROVIDERS),
                 _frame_format(),
-                F("infographic_fastgen_model", "seg", T("Модель", "Model"), None,
-                  options=catalog.FASTGEN_MODELS, visible=lambda v: v.get("infographic_provider") == "fastgen"),
                 F("infographic_veo_model", "seg", T("Модель", "Model"), None,
                   options=catalog.BANANA_MODELS, visible=lambda v: v.get("infographic_provider") == "veononstop"),
                 F("infographic_vertex_model", "seg", T("Модель", "Model"), VERTEX_MODEL_TIP,
@@ -432,7 +435,6 @@ def _images(page):
         "items": [
             F("img_gen", "seg", T("Провайдер", "Provider"),
               T("Чем генерировать картинки для сцен:\n"
-                "• FastGen — сервис с набором моделей (обычно быстрее и дешевле).\n"
                 "• VeoNonStop — модели Banana.\n"
                 "• Vertex — Google Vertex AI (модели Banana).\n"
                 "• CheapVibeCode — GPT Image 2, Grok Imagine или Banana 2 по API (оплата токенами).\n"
@@ -440,7 +442,6 @@ def _images(page):
                 "• CinAI — генерация Studio.\n"
                 "• Пропустить — не генерировать (для t2v, где видео делается прямо из текста).",
                 "What generates scene images:\n"
-                "• FastGen — a service with several models (usually faster/cheaper).\n"
                 "• VeoNonStop — Banana models.\n"
                 "• Vertex — Google Vertex AI (Banana models).\n"
                 "• CheapVibeCode — GPT Image 2, Grok Imagine or Banana 2 via API (paid in tokens).\n"
@@ -449,32 +450,13 @@ def _images(page):
                 "• Skip — don't generate (for t2v where video is made from text)."),
               options=catalog.IMAGE_PROVIDERS + [("skip", T("Пропустить", "Skip"))]),
             _frame_format(visible=lambda v: v.get("img_gen") != "skip"),
-            F("fg_quota_veo_fallback", "bool", T("Квота FastGen исчерпана → VeoNonStop", "FastGen quota out → VeoNonStop"),
-              T("Когда часовая квота выжжена на всех ключах FastGen, остаток клипов разом уходит на\n"
-                "VeoNonStop Banana Pro (берётся ключ, у которого реально есть квота).\n"
-                "Выключено — этап просто останавливается.",
-                "When the hourly quota is spent on all FastGen keys, the remaining clips go to\n"
-                "VeoNonStop Banana Pro (a key that still has quota is used).\n"
-                "Off — the stage just stops."),
-              visible=lambda v: v.get("img_gen") == "fastgen"),
-            F("veo_quota_fg_fallback", "bool", T("Квота VeoNonStop исчерпана → FastGen", "VeoNonStop quota out → FastGen"),
-              T("Дневная квота картинок VeoNonStop кончилась — сначала ищем запасной ключ с квотой,\n"
-                "иначе остаток уходит на FastGen. Выключено — докрутить циклы и остановиться.",
-                "VeoNonStop daily image quota is out — first look for a spare key with quota,\n"
-                "otherwise the rest goes to FastGen. Off — finish the cycles and stop."),
-              visible=lambda v: v.get("img_gen") == "veononstop"),
             F("veo_quota_t2v_fallback", "bool", T("Квота VeoNonStop исчерпана → T2V", "VeoNonStop quota out → T2V"),
-              T("Включено: остаток клипов пойдёт в text-to-video, когда картинки VeoNonStop исчерпаны.",
-                "On: remaining clips go to text-to-video when VeoNonStop images are exhausted."),
-              visible=lambda v: v.get("img_gen") == "veononstop"),
-            Group(None, [
-                F("fastgen_model", "seg", T("Модель", "Model"),
-                  T("Модель картинок FastGen.", "FastGen image model."),
-                  options=catalog.FASTGEN_MODELS),
-                F("fastgen_parallel", "int", T("Потоков", "Threads"),
-                  T("Сколько картинок генерировать одновременно.", "How many images at once."),
-                  lo=1, hi=32),
-            ], visible=lambda v: v.get("img_gen") == "fastgen", indent=0),
+              T("Включено: остаток клипов пойдёт в text-to-video, когда картинки VeoNonStop исчерпаны.\n"
+                "Недоступно при «Слайдшоу» и без генерации видео.",
+                "On: remaining clips go to text-to-video when VeoNonStop images are exhausted.\n"
+                "Unavailable for Slideshow and without video generation."),
+              visible=lambda v: v.get("img_gen") == "veononstop",
+              enabled=lambda v: _video_used(v) and not _video_off(v)),
             Group(None, [
                 F("veo_banana_model", "seg", T("Модель", "Model"),
                   T("Версия модели Banana. Новее — обычно качественнее.",
@@ -543,10 +525,10 @@ def _remixer(page):
                  "picture is redrawn from another angle/style keeping the scene meaning."),
         "items": [
             F("remix_engine", "seg", T("Движок", "Engine"),
-              T("• FastGen: Grok/Flower/GPT — модели FastGen.\n"
-                "• CinAI — бесплатные модели CinAI (картинка → картинка).\n• Выкл — не перерисовывать.",
-                "• FastGen: Grok/Flower/GPT — FastGen models.\n"
-                "• CinAI — free CinAI models (image → image).\n• Off — don't redraw."),
+              T("• CinAI — бесплатные модели CinAI (картинка → картинка). Нужна сессия CinAI в «Настройках».\n"
+                "• Выкл — не перерисовывать.",
+                "• CinAI — free CinAI models (image → image). Needs a CinAI session in Settings.\n"
+                "• Off — don't redraw."),
               options=catalog.REMIX_ENGINES),
             F("cinai_remix_model", "seg", T("Модель CinAI", "CinAI model"),
               T("Бесплатные модели CinAI, которые перерисовывают кадр по исходнику.",
@@ -559,7 +541,12 @@ def _remixer(page):
 
 # ======================================================== Видеогенерация
 def _video_off(v):
-    return v.get("video_mode") == "skip" or v.get("video_provider") == "skip"
+    return video_off(v)
+
+
+def _video_used(v):
+    """Видео сцен генерируется: не «Слайдшоу» (там только картинки)."""
+    return not slideshow(v)
 
 
 def _veo_video(v):
@@ -572,13 +559,18 @@ def _veo_i2v(v):
 
 
 def _parallax_supported(v):
-    return _veo_i2v(v) or _video_off(v)
+    return parallax_supported(v)
 
 
 def _video(page):
     return {
         "key": "videogen", "icon": "▷", "title": T("Генерация видео", "Video generation"),
         "items": [
+            Note(T("Слайдшоу: видео сцен не генерируется, поэтому провайдер, режим и промпты видео не действуют.\n"
+                   "Параллакс работает: оживляет отмеченные кадры через VeoNonStop.",
+                   "Slideshow: scene videos are not generated, so the video provider, mode and prompts do not apply.\n"
+                   "Parallax still works: it animates the marked frames through VeoNonStop."),
+                 role="warn", visible=slideshow),
             F("video_provider", "seg", T("Провайдер", "Provider"),
               T("Чем генерировать видео:\n• VeoNonStop — сервис VeoNonStop.\n"
                 "• Vertex — Google Vertex AI (Veo 3.1 / 3 / 2). Ключ и PROJECT_ID — в «Настройках».\n"
@@ -593,7 +585,7 @@ def _video(page):
                 "• VARAG — video via the Inflight API (plan quota). Key is in Settings.\n"
                 "• CinAI — free CinAI video models (unlimited on the plan). Session is in Settings.\n"
                 "• Skip — don't generate video: images stay still, the render adds motion (Ken Burns)."),
-              options=catalog.VIDEO_PROVIDERS + [("skip", T("Пропустить", "Skip"))]),
+              options=catalog.VIDEO_PROVIDERS + [("skip", T("Пропустить", "Skip"))], enabled=_video_used),
             F("video_mode", "seg", T("Режим", "Mode"),
               T("Как делать видео из сцены:\n"
                 "• i2v — оживить готовую картинку.\n• t2v — видео прямо из текста, без картинки\n"
@@ -601,7 +593,7 @@ def _video(page):
                 "How to make a video from a scene:\n"
                 "• i2v — animate a finished image.\n• t2v — video straight from text, no image\n"
                 "  (images are not needed and get turned off)."),
-              options=[("i2v", "i2v"), ("t2v", "t2v")], visible=lambda v: not _video_off(v)),
+              options=[("i2v", "i2v"), ("t2v", "t2v")], visible=lambda v: not _video_off(v), enabled=_video_used),
             _frame_format(),
             Custom(page.build_video_keys, visible=_veo_video),
             Group(None, [
@@ -619,7 +611,8 @@ def _video(page):
                     "Без галки клип всегда 8 секунд.",
                     "Request a clip as long as the scene needs: 4, 6 or 8 seconds (next up).\n"
                     "Without it every clip is 8 seconds.")),
-            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "vertex", indent=0),
+            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "vertex", indent=0,
+                enabled=_video_used),
             Group(None, [
                 Note(T("Модель видео: Veo 3.1 · 720p · клип 8 с · $0.02 за клип.",
                        "Video model: Veo 3.1 · 720p · 8 s clip · $0.02 per clip.")),
@@ -630,14 +623,16 @@ def _video(page):
                     "How many clips at once. The service caps jobs in flight by your plan (2–10,\n"
                     "never above 20): more is not faster, the extra just waits in the queue."),
                   lo=1, hi=20),
-            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "royaltechno", indent=0),
+            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "royaltechno", indent=0,
+                enabled=_video_used),
             Group(None, [
                 Note(T("Модель и длину клипа выбирает сам сервис: «Длительность под сцену» здесь не действует,\n"
                        "лишнее склейка подрежет.",
                        "The service picks the model and clip length: 'Duration per scene' does not apply here,\n"
                        "the render trims the extra.")),
                 F("varag_video_parallel", "int", T("Потоков", "Threads"), VARAG_PARALLEL_TIP, lo=1, hi=16),
-            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "varag", indent=0),
+            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "varag", indent=0,
+                enabled=_video_used),
             Group(None, [
                 F("cinai_video_model", "seg", T("Модель", "Model"),
                   T("Только бесплатные модели — безлимитные на тарифе CinAI. Клип выходит 720p.\n"
@@ -663,19 +658,21 @@ def _video(page):
                   T("Сколько клипов генерировать одновременно. Больше, чем разрешает тариф CinAI,\n"
                     "одновременно всё равно не пойдёт.",
                     "How many clips at once. The CinAI plan's concurrency limit still applies."), lo=1, hi=6),
-            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "cinai", indent=0),
+            ], visible=lambda v: not _video_off(v) and v.get("video_provider") == "cinai", indent=0,
+                enabled=_video_used),
             F("inflight_mode", "bool", T("Оживлять сразу (inflight)", "Animate right away (inflight)"),
               T("Запускать оживление сцены сразу, как только её картинка готова, не дожидаясь остальных.\n"
                 "Генерация картинок и видео идут внахлёст.",
                 "Start animating a scene as soon as its image is ready, without waiting for the rest.\n"
-                "Image and video generation overlap.")),
+                "Image and video generation overlap."),
+              enabled=lambda v: v.get("video_mode") == "i2v" and _video_used(v)),
             Row(F("i2v_parallax", "bool", T("Параллакс", "Parallax"),
                   T("В обычном i2v заменяет промпт сцены шаблоном параллакса. В авто-видеоистории\n"
                     "оживляет каждый N-й готовый кадр источников; остальные остаются с зумом.",
                     "In regular i2v replaces the scene prompt with a parallax template. In the auto\n"
                     "visual story it animates every N-th source frame; the rest keep the zoom."),
                   enabled=_parallax_supported),
-                F("i2v_parallax_method", "combo", T("шаблон", "template"),
+                F("i2v_parallax_method", "combo", None,
                   T("0 Вперемешку: клипы получают разные шаблоны.\n1 Balanced: мягкий естественный параллакс.\n"
                     "2 Strict: двигается только камера.\n3 Mechanical: заметное механическое движение.",
                     "0 Mixed: clips get different templates.\n1 Balanced: soft natural parallax.\n"
@@ -685,7 +682,7 @@ def _video(page):
                   enabled=lambda v: _parallax_supported(v) and v.get("i2v_parallax"))),
             Row(F("i2v_parallax_ai", "bool", T("Нейрокадрам", "AI frames"),
                   T("Нейрокадры: параллакс-промпт вместо обычного в i2v.", "AI frames: parallax prompt instead of the regular one."),
-                  enabled=lambda v: _parallax_supported(v) and v.get("i2v_parallax")),
+                  enabled=_parallax_supported),
                 F("i2v_parallax_mix_perclip", "combo", None,
                   T("Что делать с нейрокадрами:\n• вперемешку — параллакс получает каждый N-й, остальные\n"
                     "  оживляются промптами своих сцен;\n• всем — параллакс получают все нейрокадры.",
@@ -695,7 +692,7 @@ def _video(page):
                   enabled=lambda v: _veo_i2v(v) and v.get("i2v_parallax")),
                 F("i2v_parallax_stock", "bool", T("Сток-фото", "Stock photos"),
                   T("Сток-фото — отдельным проходом VeoNonStop i2v.", "Stock photos — a separate VeoNonStop i2v pass."),
-                  enabled=lambda v: _parallax_supported(v) and v.get("i2v_parallax")),
+                  enabled=_parallax_supported),
                 label=T("Кому параллакс", "Parallax for")),
             Row(F("i2v_parallax_every_n", "int", T("Каждый N-й", "Every N-th"),
                   T("Отмеченные клипы складываются в один ряд, и параллакс получает каждый N-й.\n"
@@ -747,22 +744,25 @@ def _video(page):
                 "• off — the full rewrite/redraw chain.\n"
                 "• after_rewrites — fallback right after prompt rewrites.\n"
                 "• ultrafast — fallback immediately."),
-              options=["off", "after_rewrites", "ultrafast"], visible=lambda v: not _video_off(v)),
+              options=["off", "after_rewrites", "ultrafast"], visible=lambda v: not _video_off(v),
+              enabled=_video_used),
             F("prompt_mode", "seg", T("Промпты видео", "Video prompts"),
               T("Откуда брать промпты для видео:\n• Общий — один стиль-промпт на все сцены (файл ниже).\n"
                 "• Свой для сцены — промпт режиссёра для каждой сцены (живее и точнее).",
                 "Where video prompts come from:\n• Single — one style prompt for all scenes (file below).\n"
                 "• Per clip — the director's prompt for each scene (livelier, more precise)."),
-              options=[("single", T("Общий", "Single")), ("perclip", T("Свой для сцены", "Per clip"))]),
+              options=[("single", T("Общий", "Single")), ("perclip", T("Свой для сцены", "Per clip"))],
+              enabled=_video_used),
             F("single_prompt_path", "file", T("Файл промпта", "Prompt file"),
               T("Текстовый файл с общим промптом для видео (single).", "Text file with the single video prompt."),
-              filters="Text (*.txt *.md);;All (*.*)", visible=lambda v: v.get("prompt_mode") == "single"),
+              filters="Text (*.txt *.md);;All (*.*)", visible=lambda v: v.get("prompt_mode") == "single",
+              enabled=_video_used),
             F("codex_adapt_var", "bool", T("Адаптировать промпты под видео (GPT)", "Adapt prompts for video (GPT)"),
               T("Переписать промпты сцен через GPT под оживление картинки: добавить движение камеры и\n"
                 "объектов по вашему стайлгайду.",
                 "Rewrite scene prompts with GPT for image animation: add camera and subject motion\n"
                 "following your style guide."),
-              visible=lambda v: v.get("prompt_mode") == "perclip"),
+              visible=lambda v: v.get("prompt_mode") == "perclip", enabled=_video_used),
             F("rewrite_model", "seg", T("Переписывание", "Rewrite model"),
               T("Модель, которая переписывает промпт, если генерацию заблокировал модератор: смягчает\n"
                 "формулировки (убирает имена, крупные планы травм и т.п.), сохраняя смысл сцены.",
@@ -867,9 +867,10 @@ def _render(page):
                 F("subtitles_preset", "seg", None,
                   T("Снизу — классика, по центру — крупный «вирусный» стиль.", "Bottom — classic, center — large viral style."),
                   options=[("bottom", T("снизу", "bottom")), ("center", T("по центру", "center"))],
-                  enabled=lambda v: v.get("subtitles_enabled")),
-                F("subtitles_custom", "bool", T("свой шаблон", "custom template"), None,
-                  enabled=lambda v: v.get("subtitles_enabled"))),
+                  enabled=lambda v: v.get("subtitles_enabled") and not v.get("subtitles_custom")),
+                F("subtitles_custom", "bool", T("свой шаблон", "custom template"),
+                  T("Свой файл .ass вместо встроенного шаблона. Включает и сами субтитры.",
+                    "Your own .ass file instead of the built-in template. Also turns subtitles on."))),
             F("subtitles_path", "file", T("Шаблон .ass", ".ass template"), None, filters="ASS (*.ass)",
               visible=lambda v: v.get("subtitles_enabled") and v.get("subtitles_custom")),
             Row(F("subtitle_phrase_len", "int", T("Длина фразы", "Phrase length"),

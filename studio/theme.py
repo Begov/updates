@@ -123,6 +123,7 @@ QLabel[chip="true"] {{
     background: {p['card']}; color: {p['dim']}; border: 1px solid {p['border']};
     border-radius: 11px; padding: 4px 12px; font-size: 9pt; font-weight: 600;
 }}
+QLabel[chip="true"][compact="true"] {{ padding: 3px 9px; }}
 QLabel[chip="true"][tone="ok"] {{ color: {p['green']}; border-color: {p['green']}; background: transparent; }}
 QLabel[chip="true"][tone="warn"] {{ color: {p['yellow']}; border-color: {p['yellow']}; background: transparent; }}
 QLabel[chip="true"][tone="err"] {{ color: {p['red']}; border-color: {p['red']}; background: transparent; }}

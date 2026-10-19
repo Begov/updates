@@ -99,8 +99,7 @@ def stage_env(v: dict) -> dict:
     m["INFOGRAPHIC_RATIO_TARGET"] = f"{target / 100:.3f}"
     m["INFOGRAPHIC_START_SEC"] = str(max(0, int(v.get("infographic_gate_sec", 0))))
     m["INFOGRAPHIC_RATIO_MAX"] = f"{target / 100:.3f}"
-    m["INFOGRAPHIC_IMG_PROVIDER"] = v.get("infographic_provider") or "fastgen"
-    m["INFOGRAPHIC_FASTGEN_MODEL"] = v.get("infographic_fastgen_model") or "NARWHAL"
+    m["INFOGRAPHIC_IMG_PROVIDER"] = v.get("infographic_provider") or "veononstop"
     m["INFOGRAPHIC_CINAI_MODEL"] = v.get("infographic_cinai_model") or catalog.CINAI_MODEL_DEFAULT
     m["INFOGRAPHIC_CINAI_ASPECT_RATIO"] = v.get("veo_ratio") or "16:9"      # формат ролика — один
     m["INFOGRAPHIC_CINAI_QUALITY"] = v.get("infographic_cinai_quality") or "1K"
@@ -158,10 +157,6 @@ def own_video_provider(v: dict) -> str:
     return provider if provider in catalog.OWN_VIDEO_PROVIDERS else ""
 
 
-def fastgen_slot(selection: str) -> str:
-    return {"main": "1", "backup": "2", "key3": "3", "key4": "4", "both": "all"}.get(selection or "main", "1")
-
-
 def cheapvibe_env(v: dict) -> dict:
     """Настройки картинок CheapVibeCode (GPT Image 2 / Grok Imagine / Banana 2) -> env."""
     return {
@@ -206,11 +201,6 @@ def defaults_env(v: dict) -> dict:
         "VERTEX_VIDEO_MODEL": catalog.VERTEX_VIDEO_MODEL,
         "VERTEX_VIDEO_RESOLUTION": v["vertex_video_resolution"],
         "VERTEX_VIDEO_PARALLEL": str(v["vertex_video_parallel"]),
-        "FASTGEN_MODEL": v["fastgen_model"],
-        "FASTGEN_ASPECT_RATIO": catalog.fastgen_ratio(v["veo_ratio"]),
-        "FASTGEN_MAX_PARALLEL": str(v["fastgen_parallel"]),
-        "FASTGEN_QUOTA_FALLBACK_VEONONSTOP": _on(v["fg_quota_veo_fallback"]),
-        "VEONONSTOP_QUOTA_FALLBACK_FASTGEN": _on(v["veo_quota_fg_fallback"]),
         "VEONONSTOP_QUOTA_FALLBACK_T2V": _on(v["veo_quota_t2v_fallback"]),
         "VEONONSTOP_I2V_PARALLAX": _on(v["i2v_parallax"]),
         "VEONONSTOP_I2V_PARALLAX_METHOD": str(v["i2v_parallax_method"])[:1],
@@ -280,7 +270,6 @@ def defaults_env(v: dict) -> dict:
         "BEGO_SUBTITLES_PATH": str(v.get("subtitles_path") or ""),
         "BEGO_SKIP_PREFLIGHT": "1" if v["skip_preflight"] else "0",
         "BEGO_CODEX_ADAPT": "1" if v["codex_adapt_var"] else "0",
-        "BEGO_FASTGEN_KEY_SLOT": v["fastgen_api_key"],
         "BEGO_SG_MODE": v["sg_mode"],
         "BEGO_SG_ADAPT": "1" if v["sg_adapt"] else "0",
         "BEGO_LOGO_MODE": v["logo_mode"],
@@ -295,17 +284,13 @@ def post_action_for(v: dict) -> str:
     ig = str(v.get("img_gen") or "skip")
     vm = str(v.get("video_mode") or "skip")
     action = "skip"
-    if ig == "fastgen" and vm == "i2v" and v.get("video_provider") != "cinai":
-        action = "fastgen_i2v"          # этот маршрут оживляет только через VeoNonStop
-    elif ig == "fastgen" and vm == "i2v":
-        action = "veo_i2v"
-    elif ig in ("cinai", "veononstop", "vertex", "cheapvibe", "varag") and vm == "i2v":
+    if ig in ("cinai", "veononstop", "vertex", "cheapvibe", "varag") and vm == "i2v":
         action = "veo_i2v"
     elif vm == "t2v":
         action = "t2v"
     # Без видео делаем КАРТИНКИ: слайдшоу или видеогенерация выключена
     if v.get("clip_mode") == "slideshow" or vm == "skip":
-        action = {"fastgen": "fastgen", "veononstop": "imggen", "vertex": "imggen", "cheapvibe": "imggen",
+        action = {"veononstop": "imggen", "vertex": "imggen", "cheapvibe": "imggen",
                   "varag": "imggen", "cinai": "cinai"}.get(ig, "skip")
     return action
 
@@ -407,7 +392,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
                     "varag": v["varag_video_parallel"]}.get(own_vid, v["veo_parallel"])
     if routed_img:
         ig = "veononstop"          # движок: маршрут VeoNonStop + свой клиент (см. BEGO_IMAGE_PROVIDER)
-    fg_sel = v.get("fastgen_api_key") or "main"
     env.update({
         "VEONONSTOP_MAX_PARALLEL": str(v["veo_parallel"]),
         "VEONONSTOP_ASPECT_RATIO": v["veo_ratio"],
@@ -447,8 +431,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         # нейрогенерация и нужна ли очередь видео (см. units/source_quota.py)
         "PIPELINE_VIDEO_MODE": v["video_mode"],
         "BEGO_PROMPT_TARGET": "t2v" if post_action == "t2v" else "image",
-        "FASTGEN_QUOTA_FALLBACK_VEONONSTOP": _on(v["fg_quota_veo_fallback"]),
-        "VEONONSTOP_QUOTA_FALLBACK_FASTGEN": _on(v["veo_quota_fg_fallback"]),
         "VEONONSTOP_QUOTA_FALLBACK_T2V": _on(v["veo_quota_t2v_fallback"]),
         "VEONONSTOP_I2V_PARALLAX": _on(v["i2v_parallax"]),
         "VEONONSTOP_I2V_PARALLAX_METHOD": str(v["i2v_parallax_method"])[:1],
@@ -463,9 +445,6 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
         "CINAI_VIDEO_ENABLED": "0",
         "CINAI_VIDEO_MODE": "i2v",
         "BEGO_VIDEO_ENGINE": "veononstop",
-        "FASTGEN_MODEL": v["fastgen_model"],
-        "FASTGEN_ASPECT_RATIO": catalog.fastgen_ratio(v["veo_ratio"]),
-        "FASTGEN_MAX_PARALLEL": str(v["fastgen_parallel"]),
         "BEGO_SETTINGS_SOURCE": settings_source,
         "VIDEO_CLIP_MIN_DURATION": str(v["clip_min"]),
         "VIDEO_CLIP_MAX_DURATION": str(v["clip_max"]),
@@ -489,21 +468,10 @@ def common_env(v: dict, post_action: str, settings_source: str = "pipeline") -> 
     })
     if v["clip_mode"] == "vislide":
         env["BEGO_VISLIDE_INTERVAL"] = str(v["vislide_interval"])
-    if ig == "fastgen":
-        env["BEGO_IMGGEN_KEY_SLOT"] = fastgen_slot(fg_sel)
-        env["BEGO_FASTGEN_KEY_SELECTION"] = fg_sel
-        if fg_sel == "both":
-            env["FASTGEN_DUAL_KEY"] = "1"
-        else:
-            env["FASTGEN_DUAL_KEY"] = None
-    else:
-        env["FASTGEN_DUAL_KEY"] = None
     if routed_img:
         # Vertex, CheapVibeCode и VARAG генерируют картинки только по тексту: референсы им не передаются
         env["VEONONSTOP_IMGGEN_MODE"] = "banana"
-        for name in ("FASTGEN_QUOTA_FALLBACK_VEONONSTOP", "VEONONSTOP_QUOTA_FALLBACK_FASTGEN",
-                     "VEONONSTOP_QUOTA_FALLBACK_T2V"):
-            env[name] = _on(False)         # их квоту через API не узнать — запасных путей нет
+        env["VEONONSTOP_QUOTA_FALLBACK_T2V"] = _on(False)   # их квоту через API не узнать — запасного пути нет
     elif ig == "veononstop":
         env["VEONONSTOP_IMGGEN_MODE"] = "banana"
         env["VEONONSTOP_BANANA_MODEL"] = v["veo_banana_model"]

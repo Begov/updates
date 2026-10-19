@@ -256,22 +256,11 @@ def rewrite_prompt(original_prompt: str, project_dir=None, clip_id=None) -> str:
     logging.info(f"Rewrite using {provider}:{model}")
 
     # ── Pass 1: normal rewrite instruction — up to 3 retries on refusal ──────
-    # Hard Stop — не тратим квоту rewrite'а
-    try:
-        from fastgen_engine import _flowultra_shutdown_event as _fu_stop
-        if _fu_stop.is_set():
-            logging.info(f"Rewrite aborted by shutdown before pass 1")
-            return original_prompt
-    except Exception:
-        _fu_stop = None
     template = _load_template()
     instruction = template.replace("{original_prompt}", original_prompt)
     text1 = None
     _MAX_RETRIES = 3
     for attempt in range(1, _MAX_RETRIES + 1):
-        if _fu_stop is not None and _fu_stop.is_set():
-            logging.info(f"Rewrite pass 1 aborted at attempt {attempt}")
-            return original_prompt
         result = _call(instruction)
         if not result:
             logging.warning(f"{provider} pass 1 attempt {attempt}/{_MAX_RETRIES} returned EMPTY")

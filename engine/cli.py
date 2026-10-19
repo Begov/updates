@@ -59,7 +59,6 @@ from units.inbox_manager import (
     get_all_style_guides_for_audio,
     setup_project,
 )
-from units.fastgen_engine import generate_all_images
 from units.veo_motion import generate_all_videos as veo_generate_all_videos
 from units.veo_stills import generate_all_images as veo_generate_all_images
 from units.cinai_stills import generate_all_images as cinai_generate_all_images
@@ -69,10 +68,8 @@ from units.ref_shrink import compress_refs
 
 POST_ACTION_CHOICES = [
     "skip",
-    "fastgen",
     "imggen",
     "cinai",
-    "fastgen_i2v",
     "veo_i2v",
     "t2v",
 ]
@@ -197,7 +194,6 @@ def _save_failed_prompts(project_dir: str, stage: str, failed_count: int) -> Non
 def _start_inflight_watcher(p_dir: str, video_key_slot: str, video_parallel: int,
                             ar: str, prompt_mode: str, vislide_interval: int = 0,
                             prompts_file_path: str = None,
-                            fastgen_key_slot: str = None,
                             output_dir_name: str = 'vid_img'):
     """Launch watch_i2v*.py as background subprocess for inflight i2v mode.
     Engine routing: BEGO_VIDEO_ENGINE=cinai → live_cinai.py, else live_veo.py (VeoNonStop). Returns Popen handle or None on failure."""
@@ -280,33 +276,6 @@ def _wait_inflight_watcher(proc, p_dir: str, output_dir_name: str = 'vid_img') -
 
 
 # ------------------------------------------------------------- инфографика
-def _resolve_fastgen_slot(slot: str, allow_dual: bool = False):
-    """(ключ FastGen, режим двух ключей, метка слота) по выбору слота."""
-    slot_norm = str(slot or '1').lower()
-    slot_norm = {
-        'key1': '1', 'main': '1',
-        'key2': '2', 'backup': '2',
-        'key3': '3', 'key4': '4',
-    }.get(slot_norm, slot_norm)
-    key1 = getattr(config, 'FASTGEN_API_KEY', '') or ''
-    keys = {
-        '1': key1,
-        '2': (getattr(config, 'FASTGEN_API_KEY_2', '') or
-              getattr(config, 'FASTGEN_API_KEY_BACKUP', '') or ''),
-        '3': getattr(config, 'FASTGEN_API_KEY_3', '') or '',
-        '4': getattr(config, 'FASTGEN_API_KEY_4', '') or '',
-    }
-    if slot_norm in ('2', '3', '4'):
-        _slot_key = keys.get(slot_norm) or ''
-        return (_slot_key or key1 or None, False,
-                slot_norm if _slot_key and _slot_key != key1 else '1')
-    if allow_dual and slot_norm in ('both', 'all', '1,2', '1,2,3,4'):
-        _extra = [v for k, v in keys.items() if k != '1' and v and v != key1]
-        return (key1 or None, bool(_extra), 'all' if _extra else '1')
-    return (key1 or None, False, '1')
-
-
-
 def _apply_infographic_intro_gate(p_dir: str) -> None:
     """Снять маркер `infographic` со вступления — ДО старта любых стадий.
 
@@ -379,27 +348,17 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
     provider = (getattr(config, 'INFOGRAPHIC_IMG_PROVIDER', '') or '').strip().lower()
     # Оператор инфографики не выбран (или доля инфографики была нулевой, а
     # сцены пришли сюда фолбэком из архивов) — берём ПЕРВЫЙ доступный
-    # генератор картинок и модель GPT, если провайдер её умеет, иначе
-    # Banana (требование пользователя 26.08). Без этого такие сцены
-    # оставались без исполнителя.
-    _auto_model = None
-    if provider not in ('fastgen', 'veononstop', 'vertex', 'cheapvibe', 'varag', 'cinai'):
+    # генератор картинок с моделью из настроек (требование пользователя 26.08).
+    # Без этого такие сцены оставались без исполнителя.
+    if provider not in ('veononstop', 'vertex', 'cheapvibe', 'varag', 'cinai'):
         for _cand, _ready in (
             ('cinai', bool(getattr(config, 'CINAI_ACCESS_TOKEN', ''))),
             ('veononstop', _veo_slot_key_present()),
-            ('fastgen', bool(getattr(config, 'FASTGEN_API_KEY', ''))),
         ):
             if not _ready:
                 continue
             provider = _cand
-            if _cand == 'cinai':
-                _auto_model = None                   # у CinAI — бесплатная модель из настроек
-            elif _cand == 'veononstop':
-                _auto_model = None                   # у VeoNonStop только Banana (модель из настроек)
-            else:
-                _auto_model = 'GEM_PIX_2'            # FastGen: Banana-семейство
-            print(f"  [Infographic] оператор не задан — беру {provider}"
-                  f" (модель {_auto_model})")
+            print(f"  [Infographic] оператор не задан — беру {provider}")
             break
         else:
             print("  [Infographic] нет ни одного доступного генератора картинок")
@@ -407,21 +366,7 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
                     'error': 'no image generator configured'}
     print(f"  [Infographic] {len(target_ids)} static clips -> {provider}")
     try:
-        if provider == 'fastgen':
-            info_api, info_dual, _ = _resolve_fastgen_slot(imggen_key_slot, allow_dual=True)
-            if not info_api:
-                raise RuntimeError("FASTGEN_API_KEY is not configured")
-            result = generate_all_images(
-                project_dir=p_dir,
-                clip_ids=target_ids,
-                model=_auto_model or getattr(config, 'INFOGRAPHIC_FASTGEN_MODEL', None),
-                api_key=info_api,
-                dual_key=info_dual,
-                preflight=not _skip_pf,
-                silent=True,
-                include_infographics=True,
-            )
-        elif provider == 'veononstop':
+        if provider == 'veononstop':
             if not _veo_slot_key_present():
                 raise RuntimeError("no VeoNonStop key is configured")
             # Только Banana; клиент — именно VeoNonStop, даже если основные картинки
@@ -473,7 +418,7 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
             result = cinai_generate_all_images(
                 project_dir=p_dir,
                 clip_ids=target_ids,
-                model=_auto_model or getattr(config, 'INFOGRAPHIC_CINAI_MODEL', None),
+                model=getattr(config, 'INFOGRAPHIC_CINAI_MODEL', None),
                 aspect_ratio=getattr(config, 'INFOGRAPHIC_CINAI_ASPECT_RATIO', ar),
                 quality=getattr(config, 'INFOGRAPHIC_CINAI_QUALITY', '1K'),
                 max_parallel=getattr(config, 'CINAI_MAX_PARALLEL', 6),
@@ -491,7 +436,6 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
         for _next, _ready in (
             ('cinai', bool(getattr(config, 'CINAI_ACCESS_TOKEN', ''))),
             ('veononstop', _veo_slot_key_present()),
-            ('fastgen', bool(getattr(config, 'FASTGEN_API_KEY', ''))),
         ):
             if _next in _tried or not _ready:
                 continue
@@ -505,7 +449,7 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
                         quality=getattr(config, 'INFOGRAPHIC_CINAI_QUALITY', '1K'),
                         max_parallel=getattr(config, 'CINAI_MAX_PARALLEL', 6),
                         silent=True, include_infographics=True)
-                elif _next == 'veononstop':
+                else:
                     result = veo_generate_all_images(
                         project_dir=p_dir, mode='banana', max_parallel=imggen_parallel,
                         clip_ids=target_ids, aspect_ratio=ar,
@@ -513,14 +457,6 @@ def _run_infographic_images(p_dir: str, clip_ids: list[int] | None = None) -> di
                         preflight=not _skip_pf, silent=True, include_infographics=True,
                         banana_model_key=getattr(config, 'INFOGRAPHIC_VEONONSTOP_BANANA_MODEL', None),
                         client_provider='veononstop')
-                else:
-                    _fa, _fd, _ = _resolve_fastgen_slot(imggen_key_slot, allow_dual=True)
-                    if not _fa:
-                        continue
-                    result = generate_all_images(
-                        project_dir=p_dir, clip_ids=target_ids, model='GEM_PIX_2',
-                        api_key=_fa, dual_key=_fd, preflight=not _skip_pf,
-                        silent=True, include_infographics=True)
                 print(f"  [Infographic] запасной {_next} отработал")
                 break
             except Exception as _exc2:              # noqa: BLE001
@@ -711,7 +647,7 @@ def _run_post_pipeline_silent(
     # если в прогоне будет видео: маршрут с i2v/t2v или параллакс. Раньше она
     # поднималась при любом ключе VeoNonStop — даже с видео «Пропустить»
     # (прогон 10.10: сток 100%, генерация выключена, а VeoNonStop всё равно дёргался).
-    _video_route = action not in ('skip', 'fastgen', 'imggen', 'cinai')
+    _video_route = action not in ('skip', 'imggen', 'cinai')
     _vq_needed = _video_route or bool(getattr(config, 'VEONONSTOP_I2V_PARALLAX', False))
     try:
         if _vq_needed and _has_any_veo_key():
@@ -982,7 +918,6 @@ def _run_post_pipeline_silent(
                                           os.environ.get('VEONONSTOP_MAX_PARALLEL',
                                                          config.VEONONSTOP_MAX_PARALLEL)))
     inflight_mode    = os.environ.get('BEGO_INFLIGHT_MODE', '0') == '1'
-    fg_dual_key      = os.environ.get('FASTGEN_DUAL_KEY', '0') == '1'
     vislide_interval = int(os.environ.get('BEGO_VISLIDE_INTERVAL', '0'))
     _UPS_MAP = {'2k': 'UPSAMPLE_IMAGE_RESOLUTION_2K', '4k': 'UPSAMPLE_IMAGE_RESOLUTION_4K'}
     imggen_upscale   = _UPS_MAP.get(config.VEONONSTOP_IMAGE_UPSCALE.lower())
@@ -1027,7 +962,7 @@ def _run_post_pipeline_silent(
 
     _should_adapt = (use_codex_adapt
                      and prompt_mode == 'perclip'
-                     and action in ('fastgen_i2v', 'veo_i2v'))
+                     and action == 'veo_i2v')
     if _should_adapt:
         _th.Thread(target=_run_adapt, daemon=True, name='codex-adapt').start()
         print("  [codex-adapt] VEO prompt adaptation started in background")
@@ -1131,19 +1066,6 @@ def _run_post_pipeline_silent(
     def _call_image_provider(provider: str, *, clip_ids=None):
         """Run one image provider with the current pipeline settings."""
         provider = str(provider or '').strip().lower()
-        if provider == 'fastgen':
-            if not getattr(config, 'FASTGEN_API_KEY', ''):
-                raise RuntimeError('FASTGEN_API_KEY not set for ImageGen')
-            _img_api, _img_dual, _img_slot = _resolve_fastgen_slot(
-                imggen_key_slot, allow_dual=True)
-            return generate_all_images(
-                project_dir=p_dir,
-                clip_ids=clip_ids,
-                api_key=_img_api,
-                dual_key=_img_dual,
-                preflight=not _skip_pf,
-                silent=True,
-            )
         if provider == 'veononstop':
             if not _has_any_veo_key():
                 raise RuntimeError('VeoNonStop key not set for ImageGen')
@@ -1275,8 +1197,7 @@ def _run_post_pipeline_silent(
     #  this call is a safety net for direct invocations and any leftovers.)
     _ref_dir_pf = Path(project_dir) / 'ref'
     if _ref_dir_pf.exists():
-        _ref_limit = 2.0 if action in ('fastgen', 'fastgen_i2v') else 5.0
-        compress_refs(str(_ref_dir_pf), max_mb=_ref_limit)
+        compress_refs(str(_ref_dir_pf), max_mb=5.0)
     # ─────────────────────────────────────────────────────────────────────────
 
     _skip_pf = os.environ.get('BEGO_SKIP_PREFLIGHT', '0') == '1'
@@ -1284,7 +1205,7 @@ def _run_post_pipeline_silent(
     # ── Шапка лога: печатаем ПРОВАЙДЕРОВ, которые реально отработают ──────
     # `action` — внутренний алиас пост-действия, один на несколько движков:
     # `veo_i2v` одинаково зовётся и для VeoNonStop, и для CinAI, а слоты
-    # ключей ImgKey/VidKey существуют только у VeoNonStop/FastGen. Печатать
+    # ключей ImgKey/VidKey существуют только у VeoNonStop. Печатать
     # их на прогоне CinAI — врать в лог.
     _env_video_engine = (os.environ.get('BEGO_VIDEO_ENGINE', '') or '').strip().lower()
     _pipeline_img_gen = (os.environ.get('PIPELINE_IMG_GEN')
@@ -1293,8 +1214,6 @@ def _run_post_pipeline_silent(
 
     def _img_stage_provider() -> Optional[str]:
         """Кто наполняет generated/ на этом action (None — стадии нет)."""
-        if action in ('fastgen', 'fastgen_i2v'):
-            return 'fastgen'
         if action == 'cinai':
             return 'cinai'
         if action in ('imggen', 'veo_i2v'):
@@ -1303,10 +1222,8 @@ def _run_post_pipeline_silent(
 
     def _video_stage_engine() -> Optional[str]:
         """Кто наполняет vid_img/ на этом action (None — стадии нет)."""
-        if action in ('fastgen', 'imggen', 'cinai', 'skip'):
+        if action in ('imggen', 'cinai', 'skip'):
             return None
-        if action == 'fastgen_i2v':
-            return 'veononstop'
         return 'cinai' if _env_video_engine == 'cinai' else 'veononstop'
 
     def _cinai_video_summary() -> str:
@@ -1329,9 +1246,7 @@ def _run_post_pipeline_silent(
             _iw = (getattr(config, 'CINAI_MAX_PARALLEL', 6) if action == 'cinai'
                    else (imggen_parallel or getattr(config, 'CINAI_MAX_PARALLEL', 6)))
             return f"ImageGen: CinAI (workers {max(1, min(int(_iw), 6))})"
-        _label = 'FastGen' if provider == 'fastgen' else 'VeoNonStop'
-        summary = f"ImageGen: {_label} (key {imggen_key_slot}, workers {imggen_parallel})"
-        return summary
+        return f"ImageGen: VeoNonStop (key {imggen_key_slot}, workers {imggen_parallel})"
 
     def _videogen_summary() -> Optional[str]:
         engine = _video_stage_engine()
@@ -1347,10 +1262,8 @@ def _run_post_pipeline_silent(
         + [bit for bit in (_imggen_summary(), _videogen_summary()) if bit])
         + ("  | INFLIGHT" if inflight_mode else ""))
     _settings_source = os.environ.get('BEGO_SETTINGS_SOURCE', '').strip()
-    _fastgen_selection = os.environ.get('BEGO_FASTGEN_KEY_SELECTION', '').strip()
-    if _settings_source or _fastgen_selection:
-        print(f"  Settings source: {_settings_source or 'unknown'}"
-              + (f" | FastGen selection: {_fastgen_selection}" if _fastgen_selection else ""))
+    if _settings_source:
+        print(f"  Settings source: {_settings_source}")
 
     # Инфографика — ВСЕГДА фоном. У неё свой генератор и свои клипы (маркер
     # `infographic`): основной ImageGen/VideoGen/вотчеры эти клипы фильтруют,
@@ -1379,117 +1292,7 @@ def _run_post_pipeline_silent(
         print("  [Infographic] Static generation started in parallel with the main stages")
 
     try:
-        if action == 'fastgen':
-            if not config.FASTGEN_API_KEY:
-                print("  [SKIP] FASTGEN_API_KEY not set")
-                return
-            print("  Starting FastGen image generation...")
-            result = _run_image_generation('fastgen')
-            print(f"  FastGen done: {result.get('generated', 0)} images -> generated/")
-            _mark_inflight_imagegen_done()
-
-        elif action == 'fastgen_i2v':
-            if not config.FASTGEN_API_KEY:
-                print("  [SKIP] FASTGEN_API_KEY not set")
-                return
-            if not _has_any_veo_key():
-                print("  [SKIP] VeoNonStop key not set in any slot (1-4)")
-                return
-
-            # Inflight: start live_veo.py so it animates images as they appear
-            _watch_proc = None
-            _watch_ready = _th.Event()
-            if inflight_mode:
-                if _should_adapt:
-                    # Adapt running in background — launch watcher from a deferred thread
-                    # so imggen starts immediately and isn't blocked by adapt wait
-                    def _launch_watcher_after_adapt():
-                        nonlocal _watch_proc
-                        _inflight_prompts = None
-                        if _adapt_event.wait(timeout=600) and _adapt_result[0]:
-                            _inflight_prompts = _adapt_result[0]
-                            print(f"  [codex-adapt] Ready: {Path(_inflight_prompts).name}")
-                        else:
-                            print("  [codex-adapt] Timeout — watcher uses original prompts")
-                        _watch_proc = _start_inflight_watcher(p_dir, video_key_slot, video_parallel, ar, prompt_mode,
-                                                               vislide_interval=vislide_interval,
-                                                               prompts_file_path=_inflight_prompts)
-                        _watch_ready.set()
-                    _th.Thread(target=_launch_watcher_after_adapt, daemon=True, name='deferred-watcher').start()
-                    print("  [INFLIGHT] Watcher will start after VEO adapt finishes")
-                else:
-                    _watch_proc = _start_inflight_watcher(p_dir, video_key_slot, video_parallel, ar, prompt_mode,
-                                                           vislide_interval=vislide_interval)
-                    _watch_ready.set()
-
-            print("  Starting FastGen image generation...")
-            result = _run_image_generation('fastgen')
-            ok = result.get('generated', 0)
-            img_failed = result.get('failed', 0)
-            print(f"  FastGen done: {ok} images -> generated/")
-            _mark_inflight_imagegen_done()
-
-            _t2v_result = _run_t2v_image_fallback(result)
-            if _t2v_result is not None:
-                img_failed = int(_t2v_result.get('failed', 0) or 0)
-                if img_failed > 0:
-                    _save_failed_prompts(p_dir, 't2v', img_failed)
-            elif img_failed > 0:
-                _save_failed_prompts(p_dir, 'imggen', img_failed)
-
-            if ok > 0:
-                _inflight_ok = False
-                if inflight_mode:
-                    _watch_ready.wait(timeout=660)  # ensure watcher started
-                if inflight_mode and _watch_proc is not None:
-                    _inflight_ok = _wait_inflight_watcher(_watch_proc, p_dir)
-                    if _inflight_ok:
-                        vid_failed = 0  # watch_i2v manages its own retries
-
-                if not (inflight_mode and _watch_proc is not None and _inflight_ok):
-                    vid_keys = _resolve_veo_key(video_key_slot)
-                    # Wait for Codex adapt if running
-                    if _should_adapt:
-                        if not _adapt_event.wait(timeout=600):
-                            print("  [codex-adapt] Timeout — using original prompts")
-                        elif _adapt_result[0]:
-                            print(f"  [codex-adapt] Ready: {Path(_adapt_result[0]).name}")
-                    print("  Starting VeoNonStop i2v...")
-                    single_prompt = None
-                    if prompt_mode == 'single':
-                        sp_path = Path(p_dir) / 'single_prompt.txt'
-                        if sp_path.exists():
-                            single_prompt = sp_path.read_text(encoding='utf-8-sig').strip()
-                            print(f"  Using single_prompt.txt: {single_prompt[:50]}...")
-                        else:
-                            single_prompt = 'default'
-                    _vislide_ids = _get_vislide_clip_ids() if vislide_interval >= 2 else None
-                    vid_result = veo_generate_all_videos(
-                        project_dir=p_dir, mode='i2v',
-                        max_parallel=video_parallel, aspect_ratio=ar,
-                        single_prompt=single_prompt,
-                        active_keys=vid_keys,
-                        clip_ids=_vislide_ids,
-                        silent=True,
-                        prompts_file_path=_adapt_result[0],
-                    )
-                    vid_failed = vid_result.get('failed', 0)
-                    print("  i2v done -> vid_img/")
-                    if _vislide_ids:
-                        _vislide_copy_static(_vislide_ids)
-                    if vid_failed > 0:
-                        _save_failed_prompts(p_dir, 'i2v', vid_failed)
-
-                total_failed = img_failed + vid_failed
-                if total_failed > 0:
-                    marker = Path(p_dir) / 'has_failed_clips.flag'
-                    marker.write_text(f"img_failed={img_failed}\nvid_failed={vid_failed}\n", encoding='utf-8')
-                    print(f"  [WARNING] {total_failed} clips failed (img={img_failed}, vid={vid_failed})")
-                    print(f"  Failed info saved to: failed_prompts.txt + has_failed_clips.flag")
-            elif inflight_mode and _watch_proc is not None:
-                _watch_proc.terminate()
-
-        elif action == 'imggen':
+        if action == 'imggen':
             # Image generation only — no i2v (used by slideshow mode).
             # VideoGen is VeoNonStop here. ImageGen is selected independently
             # through PIPELINE_IMG_GEN, just like the GUI ImageGen stage.
@@ -1943,9 +1746,9 @@ def _run_post_pipeline_silent(
                     _us = sorted(_undelivered)
                     # Догенерация идёт ТЕМ ЖЕ генератором, что выбран для проекта
                     # (PIPELINE_IMG_GEN — та же настройка, по которой ветвится основной
-                    # пайплайн на 1824). Раньше был хардкод VeoNonStop: проект на FastGen
-                    # получал догенерацию через VeoNonStop (чужие ключи/стиль), а при
-                    # banana_ref без рефов imggen падал.
+                    # пайплайн). Раньше был хардкод VeoNonStop: проект на другом
+                    # генераторе получал догенерацию через VeoNonStop (чужие ключи/стиль),
+                    # а при banana_ref без рефов imggen падал.
                     _fb_src = (os.environ.get('PIPELINE_IMG_GEN')
                                or getattr(config, 'PIPELINE_IMG_GEN', 'veononstop') or 'veononstop').lower()
 
@@ -2007,21 +1810,6 @@ def _run_post_pipeline_silent(
                                 silent=True,
                             )
                             print(f"  [Pre-concat fallback] CinAI: "
-                                  f"ok={_fb_result.get('generated', 0)} "
-                                  f"failed={_fb_result.get('failed', 0)}")
-                        elif _fb_src == 'fastgen' and getattr(config, 'FASTGEN_API_KEY', ''):
-                            from units.fastgen_engine import generate_all_images as _fg_gen
-                            _fb_api, _fb_dual, _fb_slot = _resolve_fastgen_slot(
-                                imggen_key_slot, allow_dual=True)
-                            _fb_result = _fg_gen(
-                                project_dir=p_dir,
-                                clip_ids=_undelivered,
-                                api_key=_fb_api,
-                                dual_key=_fb_dual,
-                                silent=True,
-                                preflight=False,
-                            )
-                            print(f"  [Pre-concat fallback] FastGen slot={_fb_slot}: "
                                   f"ok={_fb_result.get('generated', 0)} "
                                   f"failed={_fb_result.get('failed', 0)}")
                         else:

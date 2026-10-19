@@ -960,12 +960,6 @@ class VeoNonStopClient:
                     return True
             except Exception:
                 pass
-            try:
-                import fastgen_engine as _fg
-                if getattr(_fg, '_flowultra_shutdown_event', None) and _fg._flowultra_shutdown_event.is_set():
-                    return True
-            except Exception:
-                pass
             return False
 
         while time.time() < deadline:

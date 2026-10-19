@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QMenu, QMessageBox, QProgressBar, QSplitter,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
-from qfluentwidgets import LineEdit
+from qfluentwidgets import LineEdit, SmoothScrollArea
 from ..ui.widgets import Table
 
 from .. import engine_link, paths, state, theme
@@ -25,7 +25,7 @@ from ..pipeline import stages
 from ..i18n import T, tr
 from ..services import procs
 from ..services.readiness import wait_ready
-from ..ui.widgets import attach_hint, Card, Chip, LogView, button
+from ..ui.widgets import attach_hint, Card, Chip, FlowBox, LogView, button
 
 PROJECT_COLS = ["#", T("Проект", "Project"), T("Аудио", "Audio"), T("Текст", "Transcript"), T("План", "Plan"),
                 T("Картинки", "Images"), T("Видео", "Videos"), "MP4", T("Статус", "Status")]
@@ -182,10 +182,12 @@ class ControlPage(QWidget):
         split.setChildrenCollapsible(False)
         root.addWidget(split)
 
-        # левая часть: проекты + стадии + очередь склейки
+        # левая часть: проекты + стадии + очередь склейки — со своей прокруткой, чтобы
+        # на невысоком экране блоки не сжимались и не налезали друг на друга
         left = QWidget()
+        left.setObjectName("Transparent")
         ll = QVBoxLayout(left)
-        ll.setContentsMargins(0, 0, 8, 0)
+        ll.setContentsMargins(0, 0, 14, 0)
         ll.setSpacing(10)
         proj = Card(T("Проекты", "Projects"), "▤", key="cp_projects", collapsible=False)
         bar = QHBoxLayout()
@@ -241,7 +243,7 @@ class ControlPage(QWidget):
             grid.addWidget(button(text, "", tip, slot), i // 3, i % 3)
         stage_card.add(grid)
         status = QHBoxLayout()
-        status2 = QHBoxLayout()
+        status2 = FlowBox(spacing=8)
         self.status = Chip(tr(T("Готово", "Ready")))
         status.addWidget(self.status)
         self.busy = QProgressBar()
@@ -249,21 +251,20 @@ class ControlPage(QWidget):
         self.busy.setFixedHeight(6)
         status.addWidget(self.busy, 1)
         self.stop_btn = button(T("Стоп", "Stop"), "danger",
-                               T("Прибить все процессы Панели и снять серверные задачи всех провайдеров: FastGen и\n"
+                               T("Прибить все процессы Панели и снять серверные задачи всех провайдеров:\n"
                                  "VeoNonStop — на всех ключах, VARAG — все задачи ключа, RoyalTechno — запущенные\n"
                                  "программой. Работает и когда ничего не запущено (зависшие задачи на сервере).",
-                                 "Kill all Panel processes and cancel server tasks of every provider: FastGen and\n"
+                                 "Kill all Panel processes and cancel server tasks of every provider:\n"
                                  "VeoNonStop — on all keys, VARAG — all tasks of the key, RoyalTechno — those started\n"
                                  "by the app. Works even when nothing runs (stuck server tasks)."), self.stop_tasks)
-        status2.addWidget(self.stop_btn)
-        status2.addWidget(button(T("Перезапуск ключа", "Restart key"), "small",
+        status2.add(self.stop_btn)
+        status2.add(button(T("Перезапуск ключа", "Restart key"), "small",
                                 T("Снять задачи VeoNonStop на сервере, не останавливая генерацию: воркеры повторят.",
                                   "Cancel VeoNonStop server tasks without stopping generation: workers retry."),
                                 self.app.restart_key))
-        status2.addWidget(button(T("Данные ключей", "Key data"), "small",
+        status2.add(button(T("Данные ключей", "Key data"), "small",
                                 T("Обновить тариф и занятость слотов ключей.", "Refresh plan and slot usage of keys."),
                                 lambda: (self.app.monitors.refresh_veo_keys(), self.app.monitors.refresh_veo())))
-        status2.addStretch(1)
         stage_card.add(status)
         stage_card.add(status2)
         ll.addWidget(stage_card)
@@ -271,14 +272,13 @@ class ControlPage(QWidget):
         queue = Card(T("Очередь склейки", "Concat queue"), "⧗", key="cp_queue", collapsible=False,
                      tip=T("Фоновые склейки готовых проектов. Идут строго по одной.",
                            "Background renders of finished projects. Strictly one at a time."))
-        qbar = QHBoxLayout()
+        qbar = FlowBox(spacing=8)
         self.queue_state = QLabel(tr(T("пусто", "empty")))
         self.queue_state.setProperty("role", "muted")
-        qbar.addWidget(self.queue_state)
-        qbar.addStretch(1)
-        qbar.addWidget(button(T("Отменить текущую", "Cancel current"), "small", None, self._cancel_concat))
-        qbar.addWidget(button(T("Очистить завершённые", "Clear finished"), "small", None,
-                              self.app.concat_queue.clear_finished))
+        queue.head_extra.addWidget(self.queue_state)
+        qbar.add(button(T("Отменить текущую", "Cancel current"), "small", None, self._cancel_concat))
+        qbar.add(button(T("Очистить завершённые", "Clear finished"), "small", None,
+                        self.app.concat_queue.clear_finished))
         queue.add(qbar)
         self.queue_table = Table(0, 4)
         self.queue_table.setHorizontalHeaderLabels(["", tr(T("Проект", "Project")), tr(T("Прогресс", "Progress")),
@@ -294,7 +294,13 @@ class ControlPage(QWidget):
                                        "No renders yet — projects ready to render will appear here."))
         queue.add(self.queue_table)
         ll.addWidget(queue)
-        split.addWidget(left)
+        lscroll = SmoothScrollArea()
+        lscroll.setWidgetResizable(True)
+        lscroll.setObjectName("Transparent")
+        lscroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        lscroll.setWidget(left)
+        lscroll.setMinimumWidth(440)
+        split.addWidget(lscroll)
 
         # правая часть: журнал
         right = QWidget()
@@ -308,8 +314,12 @@ class ControlPage(QWidget):
         lcl.setContentsMargins(12, 10, 12, 12)
         self.logview = LogView(title=T("Журнал задач", "Task log"))
         lcl.addWidget(self.logview)
-        rl.addWidget(log_card)
+        log_card.setMinimumHeight(220)
+        rl.addWidget(log_card, 1)
+        right.setMinimumWidth(380)
         split.addWidget(right)
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 1)
         split.setSizes(state.get("control_split2", [540, 760]))
         split.splitterMoved.connect(lambda *_: state.put(control_split2=split.sizes()))
 

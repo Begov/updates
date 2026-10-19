@@ -749,7 +749,7 @@ def _load_prompts(
     if clip_ids is not None:
         wanted = {int(value) for value in clip_ids}
         prompts = {cid: text for cid, text in prompts.items() if cid in wanted}
-    # Единый source-фильтр как в imggen.py/fastgen.py: внешние стадии
+    # Единый source-фильтр как в imggen.py: внешние стадии
     # (real_photo + сток) обслуживают свои клипы сами, инфографика идёт через
     # выделенный маршрут (include_infographics=True). Раньше здесь резались
     # только real_photo* — CinAI генерил картинки поверх стока (jpg от стока

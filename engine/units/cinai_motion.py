@@ -924,7 +924,7 @@ def _chain_progress_printer(clip_id: int, image_node_id: str, video_node_id: str
 
 def _remix_frame(image_path: str, clip_id: int,
                  project_path: Path) -> Optional[str]:
-    """Ремикс исходного кадра роутером remix_i2v (FastGen / CinAI).
+    """Ремикс исходного кадра роутером remix_i2v (CinAI).
 
     Движок берётся из REMIX_ENGINE. Результат остаётся в project/remixed/ насовсем."""
     engine = str(getattr(config, 'REMIX_ENGINE', 'off') or 'off').lower()

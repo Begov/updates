@@ -159,7 +159,6 @@ from veo_client import (
     IMAGE_EXTENSIONS,
     _load_ref_images,
 )
-from fastgen_engine import FastGenClient
 
 
 # ======================================================================
@@ -1327,7 +1326,7 @@ def _process_single_clip(
     Генерация одного видеоклипа с двухфазной логикой:
 
     Фаза 1: до max_retries попыток с оригинальным промптом.
-    При цензуре/известной личности → rewrite промпта через FastGen Prompt API.
+    При цензуре/известной личности → rewrite промпта (prompt_softener, Codex).
     Фаза 2: до max_retries попыток с переписанным промптом.
 
     Returns:
@@ -2676,7 +2675,7 @@ def generate_all_videos(
         if _skip_pf:
             print(f"  [PREFLIGHT] Skipped (user disabled)")
             logging.info("PREFLIGHT components: skipped by user (BEGO_SKIP_PREFLIGHT=1)")
-        elif config.FASTGEN_PREFLIGHT_REFS and config.REMIX_AVAILABLE:
+        elif config.REF_PREFLIGHT and config.REMIX_AVAILABLE:
             import tempfile, os as _os
             print(f"  [PREFLIGHT] Testing components refs via VeoNonStop Banana...")
             logging.info("PREFLIGHT components: testing refs via VeoNonStop Banana")
@@ -2838,7 +2837,7 @@ def generate_all_videos(
                         logging.error(f"PREFLIGHT components: no refs remixed ({config.REMIX_ENGINE.upper()} unavailable?) — stopping")
                         raise RuntimeError(
                             f"PREFLIGHT FAILED: components refs blocked and {config.REMIX_ENGINE.upper()} remix unavailable.\n"
-                            "Fix: check REMIX_ENGINE API key (FASTGEN_API_KEY or CinAI session) in .env."
+                            "Fix: check the CinAI session for the remixer (REMIX_ENGINE=cinai) in .env."
                         )
                 else:
                     logging.info("PREFLIGHT components: refs OK")

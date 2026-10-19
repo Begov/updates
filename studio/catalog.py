@@ -12,24 +12,12 @@ from .i18n import T
 # Один набор на все блоки, где рисуются картинки («Генерация картинок», «Инфографика»):
 # наборы провайдеров и моделей не должны расходиться между блоками.
 IMAGE_PROVIDERS = [
-    ("fastgen", "FastGen"),
     ("veononstop", "VeoNonStop"),
     ("vertex", "Vertex"),
     ("cheapvibe", "CheapVibeCode"),
     ("varag", "VARAG"),
     ("cinai", "CinAI"),
 ]
-
-# ---------------------------------------------------------------- FastGen
-FASTGEN_MODELS = [
-    ("FLOWER", "Flower"),
-    ("GEM_PIX_2", "Banana Pro"),
-    ("NARWHAL", "Banana 2"),
-    ("GROK", "Grok"),
-    ("OPENAI", "ChatGPT Image"),
-]
-# GEM_PIX у FastGen уходит в ту же операцию nano_banana_2, что и NARWHAL, — это Banana 2,
-# поэтому отдельной кнопкой не показывается (старый выбор переводится на NARWHAL)
 
 # ------------------------------------------------------ VeoNonStop Banana
 BANANA_MODELS = [
@@ -155,9 +143,6 @@ CINAI_VIDEO_MODELS = [
 
 # ------------------------------------------------------------ Remixer
 REMIX_ENGINES = [
-    ("grok", "FastGen: Grok"),
-    ("flower", "FastGen: Flower"),
-    ("openai", "FastGen: GPT"),
     ("cinai", "CinAI"),
     ("off", T("Выкл", "Off")),
 ]
@@ -236,11 +221,6 @@ VEO_BASE_URLS = [
 def operator_model_to_id(provider: str, label: str) -> str:
     """Подпись модели из списка -> реальный идентификатор для движка."""
     return (label or "").strip()
-
-
-def fastgen_ratio(ratio: str) -> str:
-    """Формат ролика -> ориентация картинок FastGen."""
-    return "portrait" if (ratio or "").strip() == "9:16" else "landscape"
 
 
 def codex_options() -> list[tuple[str, str]]:

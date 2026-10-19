@@ -7,7 +7,8 @@ import threading
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QLinearGradient, QPainter, QPixmap, QShortcut
 from PySide6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMenu, QMessageBox, QStackedWidget, QSystemTrayIcon, QVBoxLayout, QWidget,
+    QApplication, QFrame, QHBoxLayout, QLabel, QMenu, QMessageBox, QScrollArea, QStackedWidget, QSystemTrayIcon,
+    QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     FluentIcon, FluentWindow, InfoBar, InfoBarPosition, NavigationAvatarWidget, NavigationItemPosition,
@@ -20,6 +21,13 @@ from .services import procs
 from .ui.widgets import Chip, set_tip
 
 NAV_GAP = 10   # px между боковой панелью и областью контента
+# Минимальный размер окна: все страницы перестраиваются под него без наложений.
+# Высота с запасом под ноутбуки 1366×768 и 1920×1080 при масштабе 150 % (за вычетом панели задач).
+MIN_WIDTH, MIN_HEIGHT = 1024, 640
+# Уже этой ширины боковая панель сворачивается в иконки (по кнопке-бургеру раскрывается поверх)
+NAV_EXPAND_WIDTH = 1400
+# Уже этой ширины подзаголовок страницы прячется — чипам состояния нужно место
+TOP_HINT_WIDTH = 1280
 
 PAGES = [
     ("pipeline", "PLAY", T("Конвейер", "Pipeline"),
@@ -71,7 +79,12 @@ def app_icon() -> QIcon:
 
 
 class PageHost(QWidget):
-    """Оболочка страницы: сама страница создаётся позже (сборка дорогая)."""
+    """Оболочка страницы: сама страница создаётся позже (сборка дорогая).
+
+    Страница лежит в области прокрутки: если окно меньше, чем нужно странице, появляется
+    прокрутка, а не наложение блоков друг на друга. Обычно страница помещается целиком —
+    у колонок свои прокрутки, — и полос не видно.
+    """
 
     def __init__(self, key: str):
         super().__init__()
@@ -80,10 +93,16 @@ class PageHost(QWidget):
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(12, 6, 12, 0)
         self._lay.setSpacing(0)
+        self._scroll = QScrollArea()
+        self._scroll.setObjectName("Transparent")
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._lay.addWidget(self._scroll, 1)
 
     def set_page(self, page: QWidget) -> None:
         self.page = page
-        self._lay.addWidget(page, 1)
+        page.setObjectName(page.objectName() or "Transparent")
+        self._scroll.setWidget(page)
 
 
 class MainWindow(FluentWindow):
@@ -108,12 +127,12 @@ class MainWindow(FluentWindow):
 
         self.setWindowTitle(f"{APP_NAME}")
         self.setWindowIcon(app_icon())
-        self.setMinimumSize(1200, 760)
+        self.setMinimumSize(MIN_WIDTH, MIN_HEIGHT)
         # фон задаём сами — вид не зависит от того, включён ли Mica в системе
         self.setMicaEffectEnabled(False)
         self.setCustomBackgroundColor(QColor(theme.c("bg")), QColor(theme.c("bg")))
         self.navigationInterface.setExpandWidth(250)
-        self.navigationInterface.setMinimumExpandWidth(700)
+        self.navigationInterface.setMinimumExpandWidth(NAV_EXPAND_WIDTH)
         try:
             self.navigationInterface.setReturnButtonVisible(False)
         except Exception:  # noqa: BLE001
@@ -239,6 +258,7 @@ class MainWindow(FluentWindow):
         # заголовок начинается в x=46 (там начинается строка окна) — ставим его вплотную к краю панели
         left = self.stackedWidget.mapTo(self, self.stackedWidget.rect().topLeft()).x()
         self._title_gap.setFixedWidth(max(0, left - 46))
+        self._top_hint.setVisible(bool(self._top_hint.text()) and self.width() >= TOP_HINT_WIDTH)
 
     def _build_titlebar_chips(self) -> None:
         """Чипы состояния сервисов живут в заголовке окна и видны на любой странице."""
@@ -527,9 +547,20 @@ class MainWindow(FluentWindow):
             self.notify(tr(T("Склейка не удалась", "Render failed")), name)
 
     def _expand_nav(self) -> None:
-        if not self._rebuilding:
+        # в узком окне панель остаётся иконками: раскрытая, она легла бы поверх страницы
+        if not self._rebuilding and self.width() >= NAV_EXPAND_WIDTH:
             self.navigationInterface.panel.expand(False)
-            self._sync_brand()
+        self._sync_brand()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        if getattr(self, "_top_hint", None) is not None:
+            self._sync_title_gap()
+        # окно снова стало широким (например, развернули) — панель, свёрнутую из-за узости,
+        # раскрываем обратно; свёрнутую вручную в широком окне не трогаем
+        was = event.oldSize().width()
+        if getattr(self, "_nav_opened", False) and 0 < was < NAV_EXPAND_WIDTH <= self.width():
+            QTimer.singleShot(0, self, self._expand_nav)
 
     def showEvent(self, event) -> None:  # noqa: N802 (Qt API)
         super().showEvent(event)
