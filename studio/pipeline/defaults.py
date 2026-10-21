@@ -158,7 +158,9 @@ def defaults() -> dict:
     d["vertex_image_parallel"] = max(1, _int("VERTEX_IMAGE_PARALLEL", 2))
     d["video_provider"] = _choice(env_text("BEGO_VIDEO_PROVIDER", ""), catalog.OWN_VIDEO_PROVIDERS, "veononstop")
     d["cinai_video_parallel"] = max(1, min(6, _int("CINAI_VIDEO_MAX_PARALLEL", 3)))
-    d["cinai_video_model"] = _choice(str(cfg("CINAI_VIDEO_MODEL", "")), [m for m, _ in catalog.CINAI_VIDEO_MODELS],
+    video_model = str(cfg("CINAI_VIDEO_MODEL", "")).strip()
+    video_model = "veo-3-1-fast-v3" if video_model == "veo-3-1-fast-v2" else video_model   # v2 убран у CinAI
+    d["cinai_video_model"] = _choice(video_model, [m for m, _ in catalog.CINAI_VIDEO_MODELS],
                                      catalog.CINAI_VIDEO_MODELS[0][0])
     d["royaltechno_video_parallel"] = max(1, min(20, _int("ROYALTECHNO_VIDEO_PARALLEL", 4)))
     d["varag_video_parallel"] = max(1, min(16, _int("VARAG_VIDEO_PARALLEL", 4)))
@@ -407,9 +409,9 @@ def upgrade_values(values: dict) -> dict:
             values.pop(key)
     if "cinai_remix_model" in values and values["cinai_remix_model"] not in {m for m, _ in catalog.CINAI_REMIX_MODELS}:
         values.pop("cinai_remix_model")
-    # из двух «Veo 3.1 Fast» у CinAI оставлен вариант v2
-    if values.get("cinai_video_model") == "veo-3-1-fast-v3":
-        values["cinai_video_model"] = "veo-3-1-fast-v2"
+    # «Veo 3.1 Fast» у CinAI теперь v3: v2 из каталога убран (21.10.2026)
+    if values.get("cinai_video_model") == "veo-3-1-fast-v2":
+        values["cinai_video_model"] = "veo-3-1-fast-v3"
     if "cinai_video_model" in values and values["cinai_video_model"] not in {m for m, _ in catalog.CINAI_VIDEO_MODELS}:
         values.pop("cinai_video_model")
     for key in ("cinai_quality", "infographic_cinai_quality", "cinai_remix_quality"):

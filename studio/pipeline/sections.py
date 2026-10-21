@@ -635,25 +635,34 @@ def _video(page):
                 enabled=_video_used),
             Group(None, [
                 F("cinai_video_model", "seg", T("Модель", "Model"),
-                  T("Только бесплатные модели — безлимитные на тарифе CinAI. Клип выходит 720p.\n"
-                    "При оживлении картинки длину модели не выбирают: CinGen Video 1.0 даёт 10 с,\n"
-                    "Veo 3.1 Fast и Veo 3.1 Lite — 8 с. Лишнее склейка подрежет.",
-                    "Free models only — unlimited on the CinAI plan. Clips are 720p.\n"
-                    "When animating an image the length is fixed: CinGen Video 1.0 gives 10 s,\n"
-                    "Veo 3.1 Fast and Veo 3.1 Lite — 8 s. The render trims the extra."),
+                  T("Клип выходит 720p.\n"
+                    "• Бесплатно (безлимит на тарифе CinAI): CinGen Video 1.0, Veo 3.1 Fast, Veo 3.1 Lite,\n"
+                    "  Cin Flash 1.1, Seedance 2.5 Dola, Seedance 2.0 Dola.\n"
+                    "• По квоте: Gemini Omni 1.1 Flash и Grok video — на тарифе Starter 20 клипов в месяц,\n"
+                    "  дальше 25 и 60 кредитов за клип (на Pro Omni безлимитна, у Grok 60 в месяц).\n"
+                    "Длина клипа: CinGen Video и Cin Flash — 3…10 с, Veo — 4/6/8 с, Seedance — 5/10 с,\n"
+                    "Omni — 4/6/8/10 с, Grok — 6/10/15 с (ближайшая сверху; лишнее склейка подрежет).\n"
+                    "При оживлении картинки CinGen Video 1.0 и Veo длину не принимают и отдают 8–10 с.",
+                    "Clips are 720p.\n"
+                    "• Free (unlimited on the CinAI plan): CinGen Video 1.0, Veo 3.1 Fast, Veo 3.1 Lite,\n"
+                    "  Cin Flash 1.1, Seedance 2.5 Dola, Seedance 2.0 Dola.\n"
+                    "• Quota: Gemini Omni 1.1 Flash and Grok video — 20 clips a month on Starter,\n"
+                    "  then 25 and 60 credits per clip (on Pro Omni is unlimited, Grok has 60 a month).\n"
+                    "Clip length: CinGen Video and Cin Flash — 3…10 s, Veo — 4/6/8 s, Seedance — 5/10 s,\n"
+                    "Omni — 4/6/8/10 s, Grok — 6/10/15 s (next length up; the render trims the extra).\n"
+                    "When animating an image CinGen Video 1.0 and Veo ignore the length and give 8–10 s."),
                   options=catalog.CINAI_VIDEO_MODELS),
                 F("custom_duration", "bool", T("Длительность под сцену", "Duration per scene"),
-                  T("Просить клип той длины, что нужна сцене (ближайшее сверху из того, что умеет модель):\n"
-                    "CinGen Video 1.0 — 3…10 с, Veo 3.1 Fast и Veo 3.1 Lite — 4, 6 или 8 с.\n"
-                    "Без галки все клипы одной длины — по самой длинной сцене.\n"
-                    "Работает в режиме t2v: при оживлении картинки (i2v) бесплатные модели CinAI\n"
-                    "длину не принимают и всегда отдают 8–10 с.",
-                    "Request a clip as long as the scene needs (next length up the model supports):\n"
-                    "CinGen Video 1.0 — 3…10 s, Veo 3.1 Fast and Veo 3.1 Lite — 4, 6 or 8 s.\n"
-                    "Without it every clip has one length — that of the longest scene.\n"
-                    "Works in t2v mode: when animating an image (i2v) free CinAI models ignore\n"
-                    "the length and always give 8–10 s."),
-                  enabled=lambda v: v.get("video_mode") == "t2v"),
+                  T("Просить клип той длины, что нужна сцене (ближайшее сверху из того, что умеет модель —\n"
+                    "ряды длин в подсказке к модели). Без галки все клипы одной длины — по самой длинной сцене.\n"
+                    "При оживлении картинки (i2v) CinGen Video 1.0, Veo 3.1 Fast и Veo 3.1 Lite длину\n"
+                    "не принимают и всегда отдают 8–10 с — с ними галка работает только в t2v.",
+                    "Request a clip as long as the scene needs (next length up the model supports — see\n"
+                    "the model tooltip). Without it every clip has one length — that of the longest scene.\n"
+                    "When animating an image (i2v) CinGen Video 1.0, Veo 3.1 Fast and Veo 3.1 Lite ignore\n"
+                    "the length and always give 8–10 s — with them it works only in t2v."),
+                  enabled=lambda v: v.get("video_mode") == "t2v"
+                  or v.get("cinai_video_model") not in catalog.CINAI_VIDEO_FIXED_I2V_LENGTH),
                 F("cinai_video_parallel", "int", T("Потоков", "Threads"),
                   T("Сколько клипов генерировать одновременно. Больше, чем разрешает тариф CinAI,\n"
                     "одновременно всё равно не пойдёт.",

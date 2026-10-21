@@ -295,6 +295,8 @@ class ModelCatalog:
         known = self.settings(slug)
         out: Dict[str, Any] = {}
         for key, value in (desired or {}).items():
+            if key == "aspect_ratio" and key not in known:
+                key = self.ratio_key(slug) or key        # у seedance-2-5 формат — `ratio`
             if value is None or key not in known:
                 continue
             options = self.option_values(slug, key)

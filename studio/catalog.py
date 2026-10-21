@@ -133,13 +133,22 @@ CINAI_REMIX_MODELS = [
 # Формат кадра ролика — один на все генераторы (картинки, инфографика, ремиксер, видео, склейка).
 # Квадрат (1:1) убран: его не умеют видео CinAI и VARAG.
 FRAME_FORMATS = ["16:9", "9:16"]
-# Видео CinAI — только бесплатные модели (безлимитные на тарифе, проверены t2v и i2v;
-# движок сверяется с CINAI_FREE_VIDEO_MODELS в engine/params.py).
+# Видео CinAI (движок сверяется с CINAI_VIDEO_MODELS в engine/params.py). Первые шесть
+# бесплатны или безлимитны на тарифе; Gemini Omni 1.1 Flash и Grok video — квота
+# (Starter: 20 в месяц, дальше 25 / 60 кредитов за клип).
 CINAI_VIDEO_MODELS = [
     ("cinai-g-video", "CinGen Video 1.0"),
-    ("veo-3-1-fast-v2", "Veo 3.1 Fast"),
+    ("veo-3-1-fast-v3", "Veo 3.1 Fast"),
     ("veo-3-1-lite", "Veo 3.1 Lite"),
+    ("cinai-omni-flash-1-1", "Cin Flash 1.1"),
+    ("seedance-2-5", "Seedance 2.5 Dola"),
+    ("seedance-2-0-lite-new", "Seedance 2.0 Dola"),
+    ("omni-1-1-flash", "Gemini Omni 1.1 Flash"),
+    ("grok-video-i2v", "Grok video"),
 ]
+# При оживлении картинки (i2v) эти модели длину клипа не принимают и всегда отдают 8–10 с;
+# остальные заказанную длину соблюдают (проверено 21.10.2026).
+CINAI_VIDEO_FIXED_I2V_LENGTH = {"cinai-g-video", "veo-3-1-fast-v3", "veo-3-1-lite"}
 
 # ------------------------------------------------------------ Remixer
 REMIX_ENGINES = [

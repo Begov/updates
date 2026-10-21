@@ -81,8 +81,9 @@ python -m venv .venv
 3. **CinAI:** «Открыть cinai.tv», войдите на сайте, затем «Забрать сессию из браузера».
    Для картинок и ремиксера в программе доступны только бесплатные модели CinAI — безлимитные
    на тарифе (Banana Pro, Banana 2, Banana 2 Lite, Cin Lite Flash 1.1, CinGen Image 1.0).
-   Видео через CinAI — тоже только бесплатные модели (CinGen Video 1.0, Veo 3.1 Fast, Veo 3.1 Lite),
-   720p, форматы 16:9 и 9:16.
+   Видео через CinAI — бесплатные модели (CinGen Video 1.0, Veo 3.1 Fast, Veo 3.1 Lite, Cin Flash 1.1,
+   Seedance 2.5 Dola, Seedance 2.0 Dola) и квотные Gemini Omni 1.1 Flash и Grok video (на тарифе
+   Starter — 20 клипов в месяц, дальше кредиты), 720p, форматы 16:9 и 9:16.
    Потом сессия продлевается автоматически.
 4. Нажмите **«Сохранить»** (Ctrl+S).
 

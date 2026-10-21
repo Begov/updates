@@ -240,7 +240,8 @@ def main() -> int:
     if task == "videogen" and a.get("engine") == "cinai":
         import params as config
         from units.cinai_motion import generate_all_videos as cinai_generate_all_videos
-        model = a.get("model") if a.get("model") in config.CINAI_FREE_VIDEO_MODELS else config.CINAI_VIDEO_MODEL
+        model = config._CINAI_VIDEO_RENAMED.get(a.get("model"), a.get("model"))
+        model = model if model in config.CINAI_VIDEO_MODELS else config.CINAI_VIDEO_MODEL
         result = cinai_generate_all_videos(str(project), mode=a.get("mode", "i2v"),
                                            max_parallel=int(a.get("parallel", 3)), aspect_ratio=a.get("aspect"),
                                            model=model, duration=a.get("duration"), resolution="",

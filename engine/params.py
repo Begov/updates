@@ -790,7 +790,8 @@ except ValueError:
 
 # Директ-тайминг: заказывать у видео-модели длительность КАЖДОГО клипа
 # (из montage_plan), а не одну общую из настроек: ближайшую сверху из того, что
-# умеет модель (CinGen Video — 3..10с, Veo 3.1 Fast и Lite — 4/6/8с).
+# умеет модель (CinGen Video и Cin Flash 1.1 — 3..10с, Veo 3.1 Fast и Lite — 4/6/8с,
+# Seedance — 5/10с, Gemini Omni 1.1 Flash — 4/6/8/10с, Grok video — 6/10/15с).
 # Лишний хвост подрезает concat.
 # В интерфейсе — та же галка «Длительность под сцену». У бесплатных моделей длину
 # соблюдает только t2v: при оживлении картинки они всегда отдают 8-10 с.
@@ -813,11 +814,21 @@ PIPELINE_VIDEO_ENGINE = (
 if PIPELINE_VIDEO_ENGINE not in ('veononstop', 'cinai'):
     PIPELINE_VIDEO_ENGINE = 'veononstop'
 CINAI_VIDEO_ENABLED = os.getenv('CINAI_VIDEO_ENABLED', 'false').lower() in ('true', '1', 'yes')
-# Видеомодели CinAI — ТОЛЬКО бесплатные (безлимитные на тарифе, проверены t2v и i2v
-# 11.10.2026; см. VIDEO_PROFILES в units/cinai_motion.py). Квотные Seedance 2.0 Lite,
-# Omni Flash и Grok Video (20 в месяц, дальше кредиты) и платные сюда не входят.
-CINAI_FREE_VIDEO_MODELS = ('cinai-g-video', 'veo-3-1-fast-v2', 'veo-3-1-lite')
-CINAI_VIDEO_MODEL = _cinai_free(os.getenv('CINAI_VIDEO_MODEL', ''), CINAI_FREE_VIDEO_MODELS)
+# Видеомодели CinAI, доступные в программе (см. VIDEO_PROFILES в units/cinai_motion.py).
+# Первые три — бесплатные; Cin Flash 1.1 безлимитна на всех тарифах, Seedance 2.5 / 2.0
+# Dola бесплатны, Gemini Omni 1.1 Flash и Grok video — квота (Starter: 20 в месяц,
+# дальше кредиты). Значение вне списка заменяется первой моделью.
+CINAI_VIDEO_MODELS = (
+    'cinai-g-video', 'veo-3-1-fast-v3', 'veo-3-1-lite',
+    'cinai-omni-flash-1-1', 'seedance-2-5', 'seedance-2-0-lite-new',
+    'omni-1-1-flash', 'grok-video-i2v',
+)
+# «Veo 3.1 Fast» у CinAI теперь v3 (v2 из каталога убран 21.10.2026) — старые .env и
+# pipeline_config.json проектов переводятся, а не падают на первую модель списка.
+_CINAI_VIDEO_RENAMED = {'veo-3-1-fast-v2': 'veo-3-1-fast-v3'}
+_cinai_video_env = (os.getenv('CINAI_VIDEO_MODEL', '') or '').strip()
+CINAI_VIDEO_MODEL = _cinai_free(_CINAI_VIDEO_RENAMED.get(_cinai_video_env, _cinai_video_env),
+                                CINAI_VIDEO_MODELS)
 CINAI_VIDEO_MODE = (os.getenv('CINAI_VIDEO_MODE', 't2v') or 't2v').strip().lower()
 CINAI_VIDEO_ASPECT_RATIO = (
     os.getenv('CINAI_VIDEO_ASPECT_RATIO', '16:9') or '16:9'

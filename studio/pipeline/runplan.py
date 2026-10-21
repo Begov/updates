@@ -145,7 +145,7 @@ def cinai_video_env(v: dict) -> dict:
         # общая длина клипа: ближайшая допустимая не короче самого длинного клипа.
         # С «Длительностью под сцену» у каждого клипа своя (CINAI_VIDEO_DIRECT_TIMING)
         "CINAI_VIDEO_DURATION": str(max(3, int(v.get("clip_max", 8)))),
-        "CINAI_VIDEO_RESOLUTION": "",          # у бесплатных моделей разрешение не выбирается
+        "CINAI_VIDEO_RESOLUTION": "",          # разрешение не выбирается: умолчание модели (720p)
         "CINAI_VIDEO_AUDIO": "",
         "CINAI_VIDEO_MAX_PARALLEL": str(_clamp(v.get("cinai_video_parallel", 3), 1, 6)),
     }

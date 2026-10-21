@@ -65,12 +65,14 @@ class CinAIVideoProfile:
 
 
 VIDEO_PROFILES: Dict[str, CinAIVideoProfile] = {
-    # Только бесплатные видеомодели: безлимитные на тарифе аккаунта
-    # (pricing.plan_perks.<тариф>.type = unlimited, /api/model-perks/status),
-    # проверены реальной генерацией t2v и i2v 11.10.2026. Квотные (Seedance 2.0
-    # Lite, Omni Flash, Grok Video — 20 в месяц, дальше кредиты) и платные убраны.
-    # Формат 1:1 ни одна из них не умеет. Настройки уходят через каталог модели
-    # (ModelCatalog.build_settings) — профиль лишь отсекает неверный запрос заранее.
+    # Видеомодели, доступные в программе. Первые три — бесплатные (безлимитные на
+    # тарифе, pricing.plan_perks.<тариф>.type = unlimited), проверены реальной
+    # генерацией t2v и i2v 11.10.2026. Остальные добавлены 21.10.2026 по каталогу
+    # /api/entities/Model: Seedance 2.5 / 2.0 Dola — бесплатные, Cin Flash 1.1 —
+    # безлимитная на всех тарифах, Gemini Omni 1.1 Flash и Grok video — квота
+    # (Starter: 20 в месяц, дальше 25 / 60 кредитов). Настройки уходят через каталог
+    # модели (ModelCatalog.build_settings) — профиль лишь отсекает неверный запрос
+    # заранее и задаёт ряд длительностей; форматы — как в каталоге.
     "cinai-g-video": CinAIVideoProfile(
         slug="cinai-g-video",
         modes=("t2v", "i2v"),
@@ -80,8 +82,8 @@ VIDEO_PROFILES: Dict[str, CinAIVideoProfile] = {
         max_duration=10,
         duration_wire="seconds_suffix",
     ),
-    "veo-3-1-fast-v2": CinAIVideoProfile(
-        slug="veo-3-1-fast-v2",
+    "veo-3-1-fast-v3": CinAIVideoProfile(               # Veo 3.1 Fast (v2 из каталога убран 21.10.2026)
+        slug="veo-3-1-fast-v3",
         modes=("t2v", "i2v"),
         max_images=None,
         aspect_ratios=("16:9", "9:16"),
@@ -104,7 +106,65 @@ VIDEO_PROFILES: Dict[str, CinAIVideoProfile] = {
         duration_wire="seconds_suffix",
         resolution_wire=True,
     ),
+    "cinai-omni-flash-1-1": CinAIVideoProfile(          # Cin Flash 1.1
+        slug="cinai-omni-flash-1-1",
+        modes=("t2v", "i2v"),
+        max_images=None,
+        aspect_ratios=("16:9", "9:16"),
+        resolutions=("360p", "720p", "1080p", "4k"),
+        min_duration=3,
+        max_duration=10,
+        duration_wire="seconds_suffix",
+        resolution_wire=True,
+    ),
+    "seedance-2-5": CinAIVideoProfile(                  # Seedance 2.5 Dola (формат — ключ `ratio`)
+        slug="seedance-2-5",
+        modes=("t2v", "i2v"),
+        max_images=None,
+        aspect_ratios=("16:9", "9:16", "1:1", "3:4", "4:3", "21:9"),
+        min_duration=5,
+        max_duration=10,
+        duration_values=(5, 10),
+        duration_wire="seconds_suffix",
+    ),
+    "seedance-2-0-lite-new": CinAIVideoProfile(         # Seedance 2.0 Dola
+        slug="seedance-2-0-lite-new",
+        modes=("t2v", "i2v"),
+        max_images=None,
+        aspect_ratios=("16:9", "9:16", "1:1", "3:4", "4:3", "21:9"),
+        min_duration=5,
+        max_duration=10,
+        duration_values=(5, 10),
+        duration_wire="seconds_suffix",
+    ),
+    "omni-1-1-flash": CinAIVideoProfile(                # Gemini Omni 1.1 Flash (квота)
+        slug="omni-1-1-flash",
+        modes=("t2v", "i2v"),
+        max_images=None,
+        aspect_ratios=("16:9", "9:16"),
+        min_duration=4,
+        max_duration=10,
+        duration_values=(4, 6, 8, 10),
+        duration_wire="seconds_suffix",
+    ),
+    "grok-video-i2v": CinAIVideoProfile(                # Grok video (квота; длительность без «s»)
+        slug="grok-video-i2v",
+        modes=("t2v", "i2v"),
+        max_images=None,
+        aspect_ratios=("16:9", "9:16", "1:1", "2:3", "3:2"),
+        resolutions=("480p", "720p"),
+        min_duration=6,
+        max_duration=15,
+        duration_values=(6, 10, 15),
+        resolution_wire=True,
+    ),
 }
+
+
+def mode_settings(mode: str) -> Dict[str, str]:
+    """Вкладка режима — у моделей, где она есть среди настроек (Seedance 2.5:
+    `video_modes` без значения по умолчанию). Модели без неё build_settings отсеет."""
+    return {"video_modes": "text-to-video" if mode == "t2v" else "image-to-video"}
 
 
 def snap_duration(model: str, seconds: Any) -> int:
@@ -128,7 +188,7 @@ def scene_duration(catalog: Any, model: str, seconds: float) -> Optional[str]:
     что умеет модель, как у VeoNonStop, — лишний хвост подрежет склейка, а
     растягивать короткий клип замедлением хуже. Длиннее максимума — максимум.
 
-    Бесплатные модели берём по профилю (у Veo 3.1 Lite / Fast ряд 4/6/8, его
+    Модели программы берём по профилю (у Veo 3.1 Lite / Fast ряд 4/6/8, его
     «ближайшее» по каталогу пропускало). Незнакомые — по каталогу, там подбор
     включается лишь при плавном ряде длин (крупный ряд раздувал бы кредиты)."""
     if (model or "").strip() in VIDEO_PROFILES:
@@ -1109,6 +1169,7 @@ def generate_all_videos(
             "duration": requested_duration,
             "resolution": requested_resolution or None,
             "generate_audio": requested_audio,
+            **mode_settings(requested_mode),
         }
         # ранний отказ одной строкой до трат (charge_phase=pre) + отсев
         # настроек, которых у модели нет (у seedance-lite нет resolution)
@@ -1132,6 +1193,7 @@ def generate_all_videos(
                     "duration": picked,
                     "resolution": requested_resolution or None,
                     "generate_audio": requested_audio,
+                    **mode_settings(requested_mode),
                 })
                 _wf_settings_cache[str(picked)] = cached
             return cached
@@ -1499,7 +1561,7 @@ def generate_chained_i2v(
         "max_number": 1, "scene_preset": "off"})
     vid_settings = catalog.build_settings(vid_model, {
         "aspect_ratio": ratio, "duration": dur,
-        "resolution": res or None, "generate_audio": audio})
+        "resolution": res or None, "generate_audio": audio, **mode_settings("i2v")})
 
     # Длительность ПОД КАЖДЫЙ КЛИП (только у моделей с плавным рядом длин —
     # сейчас это omni 3..10с). Режиссёр режет клипы по смыслу внутри вилки из
@@ -1520,7 +1582,7 @@ def generate_chained_i2v(
         if cached is None:
             cached = catalog.build_settings(vid_model, {
                 "aspect_ratio": ratio, "duration": picked,
-                "resolution": res or None, "generate_audio": audio})
+                "resolution": res or None, "generate_audio": audio, **mode_settings("i2v")})
             _settings_by_duration[str(picked)] = cached
         return cached
 
